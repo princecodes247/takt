@@ -39,45 +39,80 @@ interface TelemetryDto {
   activeVoices: number;
   estimatedLatencyMs: number;
   midiDevice: string | null;
+  activeMidiNotes: number[];
 }
 
 const DEFAULT_BUFFERS = [64, 128, 256, 512, 1024];
 
-interface PianoKeyDef {
+interface QwertyKeyDef {
   code: string;
   label: string;
   semitone: number;
-  isBlack: boolean;
-  /** Position in white-key units for black keys */
-  whiteIndex: number;
 }
 
-const PIANO_KEYS: PianoKeyDef[] = [
-  { code: "KeyA", label: "A", semitone: 0, isBlack: false, whiteIndex: 0 },
-  { code: "KeyW", label: "W", semitone: 1, isBlack: true, whiteIndex: 0 },
-  { code: "KeyS", label: "S", semitone: 2, isBlack: false, whiteIndex: 1 },
-  { code: "KeyE", label: "E", semitone: 3, isBlack: true, whiteIndex: 1 },
-  { code: "KeyD", label: "D", semitone: 4, isBlack: false, whiteIndex: 2 },
-  { code: "KeyF", label: "F", semitone: 5, isBlack: false, whiteIndex: 3 },
-  { code: "KeyT", label: "T", semitone: 6, isBlack: true, whiteIndex: 3 },
-  { code: "KeyG", label: "G", semitone: 7, isBlack: false, whiteIndex: 4 },
-  { code: "KeyY", label: "Y", semitone: 8, isBlack: true, whiteIndex: 4 },
-  { code: "KeyH", label: "H", semitone: 9, isBlack: false, whiteIndex: 5 },
-  { code: "KeyU", label: "U", semitone: 10, isBlack: true, whiteIndex: 5 },
-  { code: "KeyJ", label: "J", semitone: 11, isBlack: false, whiteIndex: 6 },
-  { code: "KeyK", label: "K", semitone: 12, isBlack: false, whiteIndex: 7 },
-  { code: "KeyO", label: "O", semitone: 13, isBlack: true, whiteIndex: 7 },
-  { code: "KeyL", label: "L", semitone: 14, isBlack: false, whiteIndex: 8 },
-  { code: "KeyP", label: "P", semitone: 15, isBlack: true, whiteIndex: 8 },
-  { code: "Semicolon", label: ";", semitone: 16, isBlack: false, whiteIndex: 9 },
-  { code: "Quote", label: "'", semitone: 17, isBlack: false, whiteIndex: 10 },
+const QWERTY_KEYS: QwertyKeyDef[] = [
+  { code: "KeyA", label: "A", semitone: 0 },
+  { code: "KeyW", label: "W", semitone: 1 },
+  { code: "KeyS", label: "S", semitone: 2 },
+  { code: "KeyE", label: "E", semitone: 3 },
+  { code: "KeyD", label: "D", semitone: 4 },
+  { code: "KeyF", label: "F", semitone: 5 },
+  { code: "KeyT", label: "T", semitone: 6 },
+  { code: "KeyG", label: "G", semitone: 7 },
+  { code: "KeyY", label: "Y", semitone: 8 },
+  { code: "KeyH", label: "H", semitone: 9 },
+  { code: "KeyU", label: "U", semitone: 10 },
+  { code: "KeyJ", label: "J", semitone: 11 },
+  { code: "KeyK", label: "K", semitone: 12 },
+  { code: "KeyO", label: "O", semitone: 13 },
+  { code: "KeyL", label: "L", semitone: 14 },
+  { code: "KeyP", label: "P", semitone: 15 },
+  { code: "Semicolon", label: ";", semitone: 16 },
+  { code: "Quote", label: "'", semitone: 17 },
 ];
 
-const WHITE_KEYS = PIANO_KEYS.filter((k) => !k.isBlack);
-const BLACK_KEYS = PIANO_KEYS.filter((k) => k.isBlack);
 const CODE_TO_SEMITONE = new Map<string, number>(
-  PIANO_KEYS.map((k) => [k.code, k.semitone])
+  QWERTY_KEYS.map((k) => [k.code, k.semitone])
 );
+const SEMITONE_TO_LABEL = new Map<number, string>(
+  QWERTY_KEYS.map((k) => [k.semitone, k.label])
+);
+
+interface FullPianoKey {
+  note: number;
+  isBlack: boolean;
+  whiteIndex: number;
+  cLabel?: string;
+}
+
+const BLACK_PCS = new Set([1, 3, 6, 8, 10]);
+const FULL_PIANO_KEYS: FullPianoKey[] = [];
+{
+  let whiteCount = 0;
+  for (let note = 21; note <= 108; note++) {
+    const pc = note % 12;
+    const isBlack = BLACK_PCS.has(pc);
+    if (isBlack) {
+      FULL_PIANO_KEYS.push({
+        note,
+        isBlack: true,
+        whiteIndex: whiteCount - 1,
+      });
+    } else {
+      const cLabel = pc === 0 ? `C${Math.floor(note / 12) - 1}` : undefined;
+      FULL_PIANO_KEYS.push({
+        note,
+        isBlack: false,
+        whiteIndex: whiteCount,
+        cLabel,
+      });
+      whiteCount++;
+    }
+  }
+}
+
+const WHITE_KEYS = FULL_PIANO_KEYS.filter((k) => !k.isBlack);
+const BLACK_KEYS = FULL_PIANO_KEYS.filter((k) => k.isBlack);
 
 const KEYBOARD_STORAGE_KEY = "takt:computer-keyboard";
 
@@ -96,8 +131,16 @@ export default function App() {
     }
   });
   const [octave, setOctave] = useState<number>(4);
-  const [activeKeys, setActiveKeys] = useState<Set<string>>(() => new Set());
+  const [activeKeyboardNotes, setActiveKeyboardNotes] = useState<Set<number>>(
+    () => new Set()
+  );
+  const [activeMidiNotes, setActiveMidiNotes] = useState<Set<number>>(
+    () => new Set()
+  );
+  const [activeMouseNote, setActiveMouseNote] = useState<number | null>(null);
   const activeKeyNotesRef = useRef<Map<string, number>>(new Map());
+  const mousePressedRef = useRef<boolean>(false);
+  const activeMouseNoteRef = useRef<number | null>(null);
 
   useEffect(() => {
     invoke<InitialStateDto>("get_initial_state")
@@ -121,6 +164,7 @@ export default function App() {
             }
           : prev
       );
+      setActiveMidiNotes(new Set(event.payload.activeMidiNotes));
     });
 
     const unlistenMidi = listen<string[]>("takt://midi-devices", (event) => {
@@ -137,11 +181,44 @@ export default function App() {
     if (activeKeyNotesRef.current.size === 0) return;
     const notes = Array.from(activeKeyNotesRef.current.values());
     activeKeyNotesRef.current.clear();
-    setActiveKeys(new Set());
+    setActiveKeyboardNotes(new Set());
     for (const note of notes) {
       invoke("trigger_test_note", { note, down: false }).catch(() => {});
     }
   }, []);
+
+  const glissandoTo = useCallback((note: number | null) => {
+    const prev = activeMouseNoteRef.current;
+    if (prev === note) return;
+    if (prev !== null) {
+      invoke("trigger_test_note", { note: prev, down: false }).catch((err) =>
+        setError(String(err))
+      );
+    }
+    activeMouseNoteRef.current = note;
+    setActiveMouseNote(note);
+    if (note !== null) {
+      invoke("trigger_test_note", { note, down: true, velocity: 100 }).catch(
+        (err) => setError(String(err))
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const stopMouseSlide = () => {
+      if (!mousePressedRef.current && activeMouseNoteRef.current === null) return;
+      mousePressedRef.current = false;
+      glissandoTo(null);
+    };
+    window.addEventListener("pointerup", stopMouseSlide);
+    window.addEventListener("pointercancel", stopMouseSlide);
+    window.addEventListener("blur", stopMouseSlide);
+    return () => {
+      window.removeEventListener("pointerup", stopMouseSlide);
+      window.removeEventListener("pointercancel", stopMouseSlide);
+      window.removeEventListener("blur", stopMouseSlide);
+    };
+  }, [glissandoTo]);
 
   const triggerKeyNote = useCallback(
     (code: string, down: boolean) => {
@@ -152,11 +229,7 @@ export default function App() {
         const note = (octave + 1) * 12 + semitone;
         if (note < 0 || note > 127) return;
         activeKeyNotesRef.current.set(code, note);
-        setActiveKeys((prev) => {
-          const next = new Set(prev);
-          next.add(code);
-          return next;
-        });
+        setActiveKeyboardNotes(new Set(activeKeyNotesRef.current.values()));
         invoke("trigger_test_note", { note, down: true, velocity: 100 }).catch(
           (err) => setError(String(err))
         );
@@ -164,11 +237,7 @@ export default function App() {
         const note = activeKeyNotesRef.current.get(code);
         if (note === undefined) return;
         activeKeyNotesRef.current.delete(code);
-        setActiveKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(code);
-          return next;
-        });
+        setActiveKeyboardNotes(new Set(activeKeyNotesRef.current.values()));
         invoke("trigger_test_note", { note, down: false }).catch((err) =>
           setError(String(err))
         );
@@ -285,6 +354,8 @@ export default function App() {
   const handlePanic = async () => {
     setError(null);
     releaseAllKeyboardNotes();
+    mousePressedRef.current = false;
+    glissandoTo(null);
     try {
       const next = await invoke<StatusDto>("panic_all_notes_off");
       setStatus(next);
@@ -481,48 +552,70 @@ export default function App() {
         </div>
 
         <div
-          className={`mini-piano ${keyboardEnabled ? "" : "disabled"}`}
-          aria-label="Computer Keyboard Layout"
+          className="mini-piano"
+          aria-label="88-Key Piano"
         >
           <div className="white-keys">
             {WHITE_KEYS.map((key) => {
-              const pressed = activeKeys.has(key.code);
+              const pressed =
+                activeMidiNotes.has(key.note) ||
+                activeKeyboardNotes.has(key.note) ||
+                activeMouseNote === key.note;
+              const qwertyLabel = keyboardEnabled
+                ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
+                : undefined;
               return (
                 <button
-                  key={key.code}
+                  key={key.note}
                   type="button"
                   tabIndex={-1}
-                  className={`piano-key white ${pressed ? "pressed" : ""}`}
-                  onPointerDown={() => triggerKeyNote(key.code, true)}
-                  onPointerUp={() => triggerKeyNote(key.code, false)}
-                  onPointerLeave={() => triggerKeyNote(key.code, false)}
-                  onPointerCancel={() => triggerKeyNote(key.code, false)}
+                  className={`piano-key white ${pressed ? "pressed" : ""} ${qwertyLabel ? "mapped" : ""}`}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    mousePressedRef.current = true;
+                    glissandoTo(key.note);
+                  }}
+                  onPointerEnter={(e) => {
+                    if (!mousePressedRef.current || (e.buttons & 1) === 0) return;
+                    glissandoTo(key.note);
+                  }}
                 >
-                  <span className="key-cap">{key.label}</span>
+                  {qwertyLabel && <span className="key-cap">{qwertyLabel}</span>}
+                  {key.cLabel && <span className="octave-mark">{key.cLabel}</span>}
                 </button>
               );
             })}
           </div>
           <div className="black-keys">
             {BLACK_KEYS.map((key) => {
-              const pressed = activeKeys.has(key.code);
+              const pressed =
+                activeMidiNotes.has(key.note) ||
+                activeKeyboardNotes.has(key.note) ||
+                activeMouseNote === key.note;
+              const qwertyLabel = keyboardEnabled
+                ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
+                : undefined;
               const leftPct = ((key.whiteIndex + 0.65) / WHITE_KEYS.length) * 100;
               return (
                 <button
-                  key={key.code}
+                  key={key.note}
                   type="button"
                   tabIndex={-1}
                   style={{ left: `${leftPct}%` }}
-                  className={`piano-key black ${pressed ? "pressed" : ""}`}
+                  className={`piano-key black ${pressed ? "pressed" : ""} ${qwertyLabel ? "mapped" : ""}`}
                   onPointerDown={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
-                    triggerKeyNote(key.code, true);
+                    mousePressedRef.current = true;
+                    glissandoTo(key.note);
                   }}
-                  onPointerUp={() => triggerKeyNote(key.code, false)}
-                  onPointerLeave={() => triggerKeyNote(key.code, false)}
-                  onPointerCancel={() => triggerKeyNote(key.code, false)}
+                  onPointerEnter={(e) => {
+                    if (!mousePressedRef.current || (e.buttons & 1) === 0) return;
+                    e.stopPropagation();
+                    glissandoTo(key.note);
+                  }}
                 >
-                  <span className="key-cap">{key.label}</span>
+                  {qwertyLabel && <span className="key-cap">{qwertyLabel}</span>}
                 </button>
               );
             })}

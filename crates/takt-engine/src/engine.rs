@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -33,6 +33,7 @@ pub struct EngineStatus {
     pub master_volume: f32,
     pub is_playing: bool,
     pub active_voices: usize,
+    pub active_midi_notes: Vec<u8>,
 }
 
 /// Coordinates MIDI input, sample bank loading, and the real-time audio stream.
@@ -49,6 +50,7 @@ pub struct TaktEngine {
     master_volume: Arc<AtomicU32>,
     is_playing: Arc<AtomicBool>,
     active_voices: Arc<AtomicUsize>,
+    midi_active_notes: Arc<[AtomicU64; 2]>,
 }
 
 impl TaktEngine {
@@ -76,6 +78,7 @@ impl TaktEngine {
             master_volume: Arc::new(AtomicU32::new(0.8_f32.to_bits())),
             is_playing: Arc::new(AtomicBool::new(false)),
             active_voices: Arc::new(AtomicUsize::new(0)),
+            midi_active_notes: Arc::new([AtomicU64::new(0), AtomicU64::new(0)]),
         };
 
         engine.restart_audio_stream()?;
@@ -173,6 +176,16 @@ impl TaktEngine {
                 None => ("None".to_string(), 44_100, None, 0.0),
             };
 
+        let mut active_midi_notes = Vec::new();
+        for (half, atom) in self.midi_active_notes.iter().enumerate() {
+            let mut bits = atom.load(Ordering::Relaxed);
+            while bits != 0 {
+                let bit = bits.trailing_zeros() as u8;
+                active_midi_notes.push((half as u8) * 64 + bit);
+                bits &= bits - 1;
+            }
+        }
+
         EngineStatus {
             audio_device,
             sample_rate,
@@ -183,6 +196,7 @@ impl TaktEngine {
             master_volume: f32::from_bits(self.master_volume.load(Ordering::Relaxed)),
             is_playing: self.is_playing.load(Ordering::Relaxed),
             active_voices: self.active_voices.load(Ordering::Relaxed),
+            active_midi_notes,
         }
     }
 
@@ -211,20 +225,44 @@ impl TaktEngine {
         let volume_atomic = Arc::clone(&self.master_volume);
         let playing_atomic = Arc::clone(&self.is_playing);
         let voices_atomic = Arc::clone(&self.active_voices);
+        let midi_notes_atomic = Arc::clone(&self.midi_active_notes);
+        midi_notes_atomic[0].store(0, Ordering::Relaxed);
+        midi_notes_atomic[1].store(0, Ordering::Relaxed);
 
         let handle = open_output_stream(&self.audio_config, move |output, channels, sample_rate| {
             // 1. Check for a new SampleBank; push the old one back for non-RT deallocation.
             while let Ok(new_bank) = bank_rx.pop() {
                 pool.handle_event(MidiEvent::AllNotesOff, &active_bank, sample_rate);
+                midi_notes_atomic[0].store(0, Ordering::Relaxed);
+                midi_notes_atomic[1].store(0, Ordering::Relaxed);
                 let old_bank = std::mem::replace(&mut active_bank, new_bank);
                 let _ = reclaim_tx.push(old_bank);
             }
 
             // 2. Drain control events (panic, injected test events) and MIDI events.
             while let Ok(ev) = ctrl_rx.pop() {
+                if matches!(ev, MidiEvent::AllNotesOff) {
+                    midi_notes_atomic[0].store(0, Ordering::Relaxed);
+                    midi_notes_atomic[1].store(0, Ordering::Relaxed);
+                }
                 pool.handle_event(ev, &active_bank, sample_rate);
             }
             while let Ok(ev) = midi_rx.pop() {
+                match ev {
+                    MidiEvent::NoteOn { note, .. } => {
+                        let n = note & 127;
+                        midi_notes_atomic[(n >> 6) as usize].fetch_or(1u64 << (n & 63), Ordering::Relaxed);
+                    }
+                    MidiEvent::NoteOff { note, .. } => {
+                        let n = note & 127;
+                        midi_notes_atomic[(n >> 6) as usize].fetch_and(!(1u64 << (n & 63)), Ordering::Relaxed);
+                    }
+                    MidiEvent::AllNotesOff => {
+                        midi_notes_atomic[0].store(0, Ordering::Relaxed);
+                        midi_notes_atomic[1].store(0, Ordering::Relaxed);
+                    }
+                    _ => {}
+                }
                 pool.handle_event(ev, &active_bank, sample_rate);
             }
 

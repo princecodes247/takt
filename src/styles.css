@@ -45,7 +45,7 @@ body {
 
 .rack {
   width: 100%;
-  max-width: 740px;
+  max-width: 1120px;
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
   border-radius: 14px;
@@ -421,23 +421,19 @@ input[type="range"] {
 
 .mini-piano {
   position: relative;
-  height: 56px;
+  height: 76px;
   background: var(--bg-recessed);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   padding: 4px;
   user-select: none;
-  transition: opacity 150ms ease;
-}
-
-.mini-piano.disabled {
-  opacity: 0.42;
+  touch-action: none;
 }
 
 .white-keys {
   display: grid;
-  grid-template-columns: repeat(11, minmax(0, 1fr));
-  gap: 3px;
+  grid-template-columns: repeat(52, minmax(0, 1fr));
+  gap: 1.5px;
   height: 100%;
 }
 
@@ -451,15 +447,18 @@ input[type="range"] {
 }
 
 .piano-key {
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 4px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0 0 3px;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.56rem;
   font-weight: 650;
+  line-height: 1;
   transition: background-color 40ms ease, border-color 40ms ease, transform 40ms ease;
 }
 
@@ -467,6 +466,10 @@ input[type="range"] {
   background: #232833;
   border: 1px solid #353c4b;
   color: var(--text-muted);
+}
+
+.piano-key.white.mapped {
+  border-bottom: 2px solid rgba(245, 158, 11, 0.55);
 }
 
 .piano-key.white:hover {
@@ -482,13 +485,17 @@ input[type="range"] {
 
 .piano-key.black {
   position: absolute;
-  width: 6.2%;
+  width: 1.35%;
   height: 100%;
   pointer-events: auto;
   background: #0b0d11;
   border: 1px solid #2b313d;
   color: #7c8596;
   z-index: 2;
+}
+
+.piano-key.black.mapped {
+  border-bottom: 2px solid rgba(245, 158, 11, 0.65);
 }
 
 .piano-key.black:hover {
@@ -500,5 +507,19 @@ input[type="range"] {
   border-color: #fbbf24;
   color: #111317;
   transform: translateY(1px);
+}
+
+.key-cap {
+  color: var(--accent);
+  font-size: 0.58rem;
+}
+
+.piano-key.pressed .key-cap {
+  color: #111317;
+}
+
+.octave-mark {
+  font-size: 0.52rem;
+  opacity: 0.7;
 }
 

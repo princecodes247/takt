@@ -72,6 +72,7 @@ struct TelemetryDto {
     active_voices: usize,
     estimated_latency_ms: f32,
     midi_device: Option<String>,
+    active_midi_notes: Vec<u8>,
 }
 
 fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
@@ -299,6 +300,7 @@ pub fn run() {
                                 active_voices: st.active_voices,
                                 estimated_latency_ms: st.estimated_latency_ms,
                                 midi_device: st.midi_device,
+                                active_midi_notes: st.active_midi_notes,
                             },
                         );
                     }
