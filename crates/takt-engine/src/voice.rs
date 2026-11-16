@@ -1,4 +1,5 @@
 use std::f32::consts::TAU;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::midi::MidiEvent;
 use crate::sampler::SampleBank;
@@ -7,6 +8,188 @@ pub const MAX_VOICES: usize = 32;
 const PITCH_BEND_SEMITONES: f32 = 2.0;
 const VIBRATO_RATE_HZ: f32 = 5.5;
 const MAX_VIBRATO_SEMITONES: f32 = 0.35;
+
+/// Real-time adjustable voice-shaping parameters.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoundParams {
+    /// Low-pass tone brightness in `0.0..=1.0` (`1.0` = full bandwidth).
+    pub brightness: f32,
+    /// Attack ramp time in milliseconds (`0.0..=400.0`).
+    pub attack_ms: f32,
+    /// Release tail time in milliseconds (`20.0..=1500.0`).
+    pub release_ms: f32,
+    /// Stereo reverb wet mix in `0.0..=0.7`.
+    pub reverb_mix: f32,
+    /// Mid/side stereo width in `0.0..=1.5` (`1.0` = natural stereo).
+    pub stereo_width: f32,
+}
+
+impl Default for SoundParams {
+    fn default() -> Self {
+        Self {
+            brightness: 1.0,
+            attack_ms: 0.0,
+            release_ms: 85.0,
+            reverb_mix: 0.15,
+            stereo_width: 1.0,
+        }
+    }
+}
+
+/// Lock-free atomic mirror of `SoundParams` for zero-allocation audio-thread reads.
+pub struct AtomicSoundParams {
+    brightness: AtomicU32,
+    attack_ms: AtomicU32,
+    release_ms: AtomicU32,
+    reverb_mix: AtomicU32,
+    stereo_width: AtomicU32,
+}
+
+impl Default for AtomicSoundParams {
+    fn default() -> Self {
+        let d = SoundParams::default();
+        Self {
+            brightness: AtomicU32::new(d.brightness.to_bits()),
+            attack_ms: AtomicU32::new(d.attack_ms.to_bits()),
+            release_ms: AtomicU32::new(d.release_ms.to_bits()),
+            reverb_mix: AtomicU32::new(d.reverb_mix.to_bits()),
+            stereo_width: AtomicU32::new(d.stereo_width.to_bits()),
+        }
+    }
+}
+
+impl AtomicSoundParams {
+    pub fn store(&self, p: SoundParams) {
+        self.brightness
+            .store(p.brightness.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.attack_ms
+            .store(p.attack_ms.clamp(0.0, 400.0).to_bits(), Ordering::Relaxed);
+        self.release_ms
+            .store(p.release_ms.clamp(20.0, 1500.0).to_bits(), Ordering::Relaxed);
+        self.reverb_mix
+            .store(p.reverb_mix.clamp(0.0, 0.7).to_bits(), Ordering::Relaxed);
+        self.stereo_width
+            .store(p.stereo_width.clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn load(&self) -> SoundParams {
+        SoundParams {
+            brightness: f32::from_bits(self.brightness.load(Ordering::Relaxed)),
+            attack_ms: f32::from_bits(self.attack_ms.load(Ordering::Relaxed)),
+            release_ms: f32::from_bits(self.release_ms.load(Ordering::Relaxed)),
+            reverb_mix: f32::from_bits(self.reverb_mix.load(Ordering::Relaxed)),
+            stereo_width: f32::from_bits(self.stereo_width.load(Ordering::Relaxed)),
+        }
+    }
+}
+
+struct CombFilter {
+    buf: Vec<f32>,
+    idx: usize,
+    filter_store: f32,
+}
+
+impl CombFilter {
+    fn new(len: usize) -> Self {
+        Self {
+            buf: vec![0.0; len.max(1)],
+            idx: 0,
+            filter_store: 0.0,
+        }
+    }
+
+    #[inline]
+    fn process(&mut self, input: f32, feedback: f32, damp: f32) -> f32 {
+        let out = self.buf[self.idx];
+        self.filter_store = out * (1.0 - damp) + self.filter_store * damp;
+        self.buf[self.idx] = input + self.filter_store * feedback;
+        self.idx += 1;
+        if self.idx >= self.buf.len() {
+            self.idx = 0;
+        }
+        out
+    }
+}
+
+struct AllpassFilter {
+    buf: Vec<f32>,
+    idx: usize,
+}
+
+impl AllpassFilter {
+    fn new(len: usize) -> Self {
+        Self {
+            buf: vec![0.0; len.max(1)],
+            idx: 0,
+        }
+    }
+
+    #[inline]
+    fn process(&mut self, input: f32) -> f32 {
+        let buf_out = self.buf[self.idx];
+        let out = -input + buf_out;
+        self.buf[self.idx] = input + buf_out * 0.5;
+        self.idx += 1;
+        if self.idx >= self.buf.len() {
+            self.idx = 0;
+        }
+        out
+    }
+}
+
+/// Pre-allocated stereo Schroeder reverb (zero allocations in `process`).
+struct StereoReverb {
+    combs_l: [CombFilter; 4],
+    combs_r: [CombFilter; 4],
+    allpass_l: [AllpassFilter; 2],
+    allpass_r: [AllpassFilter; 2],
+}
+
+impl Default for StereoReverb {
+    fn default() -> Self {
+        Self {
+            combs_l: [
+                CombFilter::new(1557),
+                CombFilter::new(1617),
+                CombFilter::new(1491),
+                CombFilter::new(1422),
+            ],
+            combs_r: [
+                CombFilter::new(1580),
+                CombFilter::new(1640),
+                CombFilter::new(1514),
+                CombFilter::new(1445),
+            ],
+            allpass_l: [AllpassFilter::new(225), AllpassFilter::new(556)],
+            allpass_r: [AllpassFilter::new(248), AllpassFilter::new(579)],
+        }
+    }
+}
+
+impl StereoReverb {
+    #[inline]
+    fn process(&mut self, in_l: f32, in_r: f32) -> (f32, f32) {
+        let mono_in = (in_l + in_r) * 0.25;
+        let feedback = 0.82;
+        let damp = 0.32;
+
+        let mut wet_l = 0.0;
+        let mut wet_r = 0.0;
+        for c in &mut self.combs_l {
+            wet_l += c.process(mono_in, feedback, damp);
+        }
+        for c in &mut self.combs_r {
+            wet_r += c.process(mono_in, feedback, damp);
+        }
+        for a in &mut self.allpass_l {
+            wet_l = a.process(wet_l);
+        }
+        for a in &mut self.allpass_r {
+            wet_r = a.process(wet_r);
+        }
+        (wet_l * 0.35, wet_r * 0.35)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceState {
@@ -24,6 +207,8 @@ pub struct Voice {
     pub zone_idx: usize,
     pub position: f64,
     pub velocity_gain: f32,
+    pub attack_gain: f32,
+    pub attack_step: f32,
     pub env_gain: f32,
     pub release_step: f32,
     pub age: u64,
@@ -38,6 +223,8 @@ impl Default for Voice {
             zone_idx: 0,
             position: 0.0,
             velocity_gain: 0.0,
+            attack_gain: 1.0,
+            attack_step: 1.0,
             env_gain: 0.0,
             release_step: 0.0,
             age: 0,
@@ -53,6 +240,9 @@ pub struct VoicePool {
     mod_wheel: f32,
     lfo_phase: f32,
     age_counter: u64,
+    lp_l: f32,
+    lp_r: f32,
+    reverb: Box<StereoReverb>,
 }
 
 impl Default for VoicePool {
@@ -64,6 +254,9 @@ impl Default for VoicePool {
             mod_wheel: 0.0,
             lfo_phase: 0.0,
             age_counter: 0,
+            lp_l: 0.0,
+            lp_r: 0.0,
+            reverb: Box::default(),
         }
     }
 }
@@ -77,6 +270,16 @@ impl VoicePool {
     }
 
     pub fn handle_event(&mut self, event: MidiEvent, bank: &SampleBank, sample_rate: u32) {
+        self.handle_event_with_params(event, bank, sample_rate, SoundParams::default());
+    }
+
+    pub fn handle_event_with_params(
+        &mut self,
+        event: MidiEvent,
+        bank: &SampleBank,
+        sample_rate: u32,
+        params: SoundParams,
+    ) {
         match event {
             MidiEvent::NoteOn {
                 channel,
@@ -98,6 +301,11 @@ impl VoicePool {
                 self.age_counter = self.age_counter.wrapping_add(1);
                 let norm_vel = (velocity as f32 / 127.0).clamp(0.0, 1.0);
                 let velocity_gain = 0.12 + 0.88 * norm_vel.powf(1.4);
+                let (attack_gain, attack_step) = if params.attack_ms <= 0.5 {
+                    (1.0, 1.0)
+                } else {
+                    (0.0, release_step_for_ms(params.attack_ms, sample_rate))
+                };
 
                 self.voices[slot] = Voice {
                     state: VoiceState::Playing,
@@ -106,8 +314,10 @@ impl VoicePool {
                     zone_idx,
                     position: 0.0,
                     velocity_gain,
+                    attack_gain,
+                    attack_step,
                     env_gain: 1.0,
-                    release_step: release_step_for_ms(bank.release_ms, sample_rate),
+                    release_step: release_step_for_ms(params.release_ms, sample_rate),
                     age: self.age_counter,
                 };
             }
@@ -118,7 +328,7 @@ impl VoicePool {
                             v.state = VoiceState::Sustained;
                         } else {
                             v.state = VoiceState::Releasing;
-                            v.release_step = release_step_for_ms(bank.release_ms, sample_rate);
+                            v.release_step = release_step_for_ms(params.release_ms, sample_rate);
                         }
                     }
                 }
@@ -126,7 +336,7 @@ impl VoicePool {
             MidiEvent::SustainPedal { pressed, .. } => {
                 self.sustain_pressed = pressed;
                 if !pressed {
-                    let step = release_step_for_ms(bank.release_ms, sample_rate);
+                    let step = release_step_for_ms(params.release_ms, sample_rate);
                     for v in &mut self.voices {
                         if v.state == VoiceState::Sustained {
                             v.state = VoiceState::Releasing;
@@ -192,6 +402,25 @@ impl VoicePool {
         master_volume: f32,
         bank: &SampleBank,
     ) -> bool {
+        self.render_with_params(
+            output,
+            channels,
+            sample_rate,
+            master_volume,
+            bank,
+            SoundParams::default(),
+        )
+    }
+
+    pub fn render_with_params(
+        &mut self,
+        output: &mut [f32],
+        channels: u16,
+        sample_rate: u32,
+        master_volume: f32,
+        bank: &SampleBank,
+        params: SoundParams,
+    ) -> bool {
         output.fill(0.0);
         let ch = channels.max(1) as usize;
         let num_frames = output.len() / ch;
@@ -201,6 +430,16 @@ impl VoicePool {
 
         let mut any_active = false;
         let lfo_inc = VIBRATO_RATE_HZ / sample_rate as f32;
+        let use_lp = params.brightness < 0.995;
+        let lp_alpha = if use_lp {
+            let cutoff = 600.0 * (30.0_f32).powf(params.brightness.clamp(0.0, 1.0));
+            let dt = 1.0 / sample_rate as f32;
+            let rc = 1.0 / (TAU * cutoff);
+            (dt / (rc + dt)).clamp(0.01, 1.0)
+        } else {
+            1.0
+        };
+        let use_reverb = params.reverb_mix > 0.001;
 
         for frame_idx in 0..num_frames {
             let vibrato = if self.mod_wheel > 0.001 {
@@ -249,9 +488,13 @@ impl VoicePool {
                 let sample_l = s0[0] + (s1[0] - s0[0]) * frac;
                 let sample_r = s0[1] + (s1[1] - s0[1]) * frac;
 
-                let gain = v.velocity_gain * v.env_gain;
+                let gain = v.velocity_gain * v.env_gain * v.attack_gain;
                 mix_l += sample_l * gain;
                 mix_r += sample_r * gain;
+
+                if v.attack_gain < 1.0 {
+                    v.attack_gain = (v.attack_gain + v.attack_step).min(1.0);
+                }
 
                 let semitones =
                     (v.note as f32 - zone.root_note as f32) + self.pitch_bend_semitones + vibrato;
@@ -278,6 +521,26 @@ impl VoicePool {
                         v.state = VoiceState::Idle;
                     }
                 }
+            }
+
+            if use_lp {
+                self.lp_l += lp_alpha * (mix_l - self.lp_l);
+                self.lp_r += lp_alpha * (mix_r - self.lp_r);
+                mix_l = self.lp_l;
+                mix_r = self.lp_r;
+            }
+
+            if (params.stereo_width - 1.0).abs() > 0.01 {
+                let mid = 0.5 * (mix_l + mix_r);
+                let side = 0.5 * (mix_l - mix_r) * params.stereo_width;
+                mix_l = mid + side;
+                mix_r = mid - side;
+            }
+
+            if use_reverb {
+                let (wet_l, wet_r) = self.reverb.process(mix_l, mix_r);
+                mix_l += wet_l * params.reverb_mix;
+                mix_r += wet_r * params.reverb_mix;
             }
 
             let out_l = (mix_l * master_volume).tanh();

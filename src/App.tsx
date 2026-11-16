@@ -35,7 +35,24 @@ interface StatusDto {
   worshipPadEnabled: boolean;
   worshipPadKey: number;
   worshipPadVolume: number;
+  soundParams: SoundParamsDto;
 }
+
+interface SoundParamsDto {
+  brightness: number;
+  attackMs: number;
+  releaseMs: number;
+  reverbMix: number;
+  stereoWidth: number;
+}
+
+const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
+  brightness: 1.0,
+  attackMs: 0.0,
+  releaseMs: 85.0,
+  reverbMix: 0.15,
+  stereoWidth: 1.0,
+};
 
 interface InitialStateDto {
   midiDevices: string[];
@@ -467,6 +484,17 @@ export default function App() {
     }
   };
 
+  const handleSoundParamChange = async (patch: Partial<SoundParamsDto>) => {
+    const current = status?.soundParams ?? DEFAULT_SOUND_PARAMS;
+    const nextParams: SoundParamsDto = { ...current, ...patch };
+    setStatus((prev) => (prev ? { ...prev, soundParams: nextParams } : prev));
+    try {
+      await invoke("set_sound_params", { params: nextParams });
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
   const currentAudioDevice = audioDevices.find(
     (d) => d.name === status?.audioDevice
   );
@@ -674,6 +702,105 @@ export default function App() {
               </button>
             );
           })}
+        </div>
+
+        <div className="params-strip" aria-label="Voice Shaping">
+          <div className="param-item">
+            <div className="param-head">
+              <span>Tone</span>
+              <span>
+                {Math.round((status?.soundParams.brightness ?? 1) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round((status?.soundParams.brightness ?? 1) * 100)}
+              onChange={(e) =>
+                handleSoundParamChange({ brightness: Number(e.target.value) / 100 })
+              }
+            />
+          </div>
+
+          <div className="param-item">
+            <div className="param-head">
+              <span>Attack</span>
+              <span>{Math.round(status?.soundParams.attackMs ?? 0)} ms</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={300}
+              value={Math.round(status?.soundParams.attackMs ?? 0)}
+              onChange={(e) =>
+                handleSoundParamChange({ attackMs: Number(e.target.value) })
+              }
+            />
+          </div>
+
+          <div className="param-item">
+            <div className="param-head">
+              <span>Release</span>
+              <span>{Math.round(status?.soundParams.releaseMs ?? 85)} ms</span>
+            </div>
+            <input
+              type="range"
+              min={20}
+              max={1200}
+              step={5}
+              value={Math.round(status?.soundParams.releaseMs ?? 85)}
+              onChange={(e) =>
+                handleSoundParamChange({ releaseMs: Number(e.target.value) })
+              }
+            />
+          </div>
+
+          <div className="param-item">
+            <div className="param-head">
+              <span>Reverb</span>
+              <span>
+                {Math.round((status?.soundParams.reverbMix ?? 0.15) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={70}
+              value={Math.round((status?.soundParams.reverbMix ?? 0.15) * 100)}
+              onChange={(e) =>
+                handleSoundParamChange({ reverbMix: Number(e.target.value) / 100 })
+              }
+            />
+          </div>
+
+          <div className="param-item">
+            <div className="param-head">
+              <span>Width</span>
+              <span>
+                {Math.round((status?.soundParams.stereoWidth ?? 1) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={150}
+              value={Math.round((status?.soundParams.stereoWidth ?? 1) * 100)}
+              onChange={(e) =>
+                handleSoundParamChange({
+                  stereoWidth: Number(e.target.value) / 100,
+                })
+              }
+            />
+          </div>
+
+          <button
+            type="button"
+            className="btn-mini"
+            onClick={() => handleSoundParamChange(DEFAULT_SOUND_PARAMS)}
+          >
+            Reset
+          </button>
         </div>
       </section>
 

@@ -8,7 +8,7 @@ use crate::audio::{open_output_stream, AudioStreamConfig, AudioStreamHandle};
 use crate::backing::{synthesize_demo_backing_track, BackingTrackPlayer, WorshipPadPlayer};
 use crate::midi::{open_midi_input, MidiEvent, MidiInputHandle};
 use crate::sampler::{decode_audio_bytes, load_built_in_banks, SampleBank, SampleData};
-use crate::voice::VoicePool;
+use crate::voice::{AtomicSoundParams, SoundParams, VoicePool};
 use crate::EngineError;
 
 const MIDI_QUEUE_CAP: usize = 1024;
@@ -44,6 +44,7 @@ pub struct EngineStatus {
     pub worship_pad_enabled: bool,
     pub worship_pad_key: i8,
     pub worship_pad_volume: f32,
+    pub sound_params: SoundParams,
 }
 
 /// Coordinates MIDI input, sample bank loading, and the real-time audio stream.
@@ -75,6 +76,7 @@ pub struct TaktEngine {
     pad_enabled: Arc<AtomicBool>,
     pad_key: Arc<AtomicI8>,
     pad_volume: Arc<AtomicU32>,
+    sound_params: Arc<AtomicSoundParams>,
 }
 
 impl TaktEngine {
@@ -117,6 +119,7 @@ impl TaktEngine {
             pad_enabled: Arc::new(AtomicBool::new(false)),
             pad_key: Arc::new(AtomicI8::new(0)),
             pad_volume: Arc::new(AtomicU32::new(0.55_f32.to_bits())),
+            sound_params: Arc::new(AtomicSoundParams::default()),
         };
 
         engine.restart_audio_stream()?;
@@ -250,6 +253,10 @@ impl TaktEngine {
             .store(volume.clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
     }
 
+    pub fn set_sound_params(&self, params: SoundParams) {
+        self.sound_params.store(params);
+    }
+
     pub fn status(&mut self) -> EngineStatus {
         self.drain_reclaimed_banks();
         let (audio_device, sample_rate, buffer_size, estimated_latency_ms) =
@@ -299,6 +306,7 @@ impl TaktEngine {
             worship_pad_enabled: self.pad_enabled.load(Ordering::Relaxed),
             worship_pad_key: self.pad_key.load(Ordering::Relaxed),
             worship_pad_volume: f32::from_bits(self.pad_volume.load(Ordering::Relaxed)),
+            sound_params: self.sound_params.load(),
         }
     }
 
@@ -350,13 +358,15 @@ impl TaktEngine {
         let playing_atomic = Arc::clone(&self.is_playing);
         let voices_atomic = Arc::clone(&self.active_voices);
         let midi_notes_atomic = Arc::clone(&self.midi_active_notes);
+        let sound_params_atomic = Arc::clone(&self.sound_params);
         midi_notes_atomic[0].store(0, Ordering::Relaxed);
         midi_notes_atomic[1].store(0, Ordering::Relaxed);
 
         let handle = open_output_stream(&self.audio_config, move |output, channels, sample_rate| {
+            let params = sound_params_atomic.load();
             // 1. Check for a new SampleBank; push the old one back for non-RT deallocation.
             while let Ok(new_bank) = bank_rx.pop() {
-                pool.handle_event(MidiEvent::AllNotesOff, &active_bank, sample_rate);
+                pool.handle_event_with_params(MidiEvent::AllNotesOff, &active_bank, sample_rate, params);
                 midi_notes_atomic[0].store(0, Ordering::Relaxed);
                 midi_notes_atomic[1].store(0, Ordering::Relaxed);
                 let old_bank = std::mem::replace(&mut active_bank, new_bank);
@@ -369,7 +379,7 @@ impl TaktEngine {
                     midi_notes_atomic[0].store(0, Ordering::Relaxed);
                     midi_notes_atomic[1].store(0, Ordering::Relaxed);
                 }
-                pool.handle_event(ev, &active_bank, sample_rate);
+                pool.handle_event_with_params(ev, &active_bank, sample_rate, params);
             }
             while let Ok(ev) = midi_rx.pop() {
                 match ev {
@@ -387,12 +397,13 @@ impl TaktEngine {
                     }
                     _ => {}
                 }
-                pool.handle_event(ev, &active_bank, sample_rate);
+                pool.handle_event_with_params(ev, &active_bank, sample_rate, params);
             }
 
             // 3. Render active voices, backing track, and worship pad.
             let master_vol = f32::from_bits(volume_atomic.load(Ordering::Relaxed));
-            let any_active = pool.render(output, channels, sample_rate, master_vol, &active_bank);
+            let any_active =
+                pool.render_with_params(output, channels, sample_rate, master_vol, &active_bank, params);
             backing_player.render_into(output, channels, sample_rate);
             worship_pad.render_into(output, channels, sample_rate);
             playing_atomic.store(any_active, Ordering::Relaxed);

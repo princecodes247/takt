@@ -2,10 +2,11 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use takt_engine::audio::list_output_devices;
 use takt_engine::engine::TaktEngine;
 use takt_engine::midi::{list_midi_devices, MidiDeviceWatcher, MidiEvent};
+use takt_engine::voice::SoundParams;
 use tauri::{Emitter, Manager, State};
 
 type Reply<T> = mpsc::SyncSender<Result<T, String>>;
@@ -26,6 +27,7 @@ enum EngineCmd {
     SeekBackingTrack(u32),
     SetWorshipPad(bool, i8, Reply<StatusDto>),
     SetWorshipPadVolume(f32),
+    SetSoundParams(SoundParams),
 }
 
 struct AppState {
@@ -49,6 +51,40 @@ struct SoundDto {
     name: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+struct SoundParamsDto {
+    brightness: f32,
+    attack_ms: f32,
+    release_ms: f32,
+    reverb_mix: f32,
+    stereo_width: f32,
+}
+
+impl From<SoundParams> for SoundParamsDto {
+    fn from(p: SoundParams) -> Self {
+        Self {
+            brightness: p.brightness,
+            attack_ms: p.attack_ms,
+            release_ms: p.release_ms,
+            reverb_mix: p.reverb_mix,
+            stereo_width: p.stereo_width,
+        }
+    }
+}
+
+impl From<SoundParamsDto> for SoundParams {
+    fn from(p: SoundParamsDto) -> Self {
+        Self {
+            brightness: p.brightness,
+            attack_ms: p.attack_ms,
+            release_ms: p.release_ms,
+            reverb_mix: p.reverb_mix,
+            stereo_width: p.stereo_width,
+        }
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct StatusDto {
@@ -70,6 +106,7 @@ struct StatusDto {
     worship_pad_enabled: bool,
     worship_pad_key: i8,
     worship_pad_volume: f32,
+    sound_params: SoundParamsDto,
 }
 
 #[derive(Serialize, Clone)]
@@ -115,6 +152,7 @@ fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
         worship_pad_enabled: st.worship_pad_enabled,
         worship_pad_key: st.worship_pad_key,
         worship_pad_volume: st.worship_pad_volume,
+        sound_params: st.sound_params.into(),
     }
 }
 
@@ -289,6 +327,14 @@ fn set_worship_pad_volume(state: State<'_, AppState>, volume: f32) -> Result<(),
         .map_err(|_| "engine thread stopped".to_string())
 }
 
+#[tauri::command]
+fn set_sound_params(state: State<'_, AppState>, params: SoundParamsDto) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::SetSoundParams(params.into()))
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
 pub fn run() {
     let (tx, rx) = mpsc::channel::<EngineCmd>();
     let watcher_tx = tx.clone();
@@ -413,6 +459,9 @@ pub fn run() {
                         EngineCmd::SetWorshipPadVolume(vol) => {
                             engine.set_worship_pad_volume(vol);
                         }
+                        EngineCmd::SetSoundParams(params) => {
+                            engine.set_sound_params(params);
+                        }
                     };
 
                     if let Some(cmd) = pending_cmd.take() {
@@ -480,6 +529,7 @@ pub fn run() {
             seek_backing_track,
             set_worship_pad,
             set_worship_pad_volume,
+            set_sound_params,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Takt");
