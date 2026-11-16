@@ -1,0 +1,13 @@
+[package]
+name = "takt-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cpal = "0.15"
+midir = "0.10"
+rtrb = "0.3"
+symphonia = { version = "0.5", features = ["wav", "flac", "ogg", "vorbis", "pcm"] }
+thiserror = "2"
+
