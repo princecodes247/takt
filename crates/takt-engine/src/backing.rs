@@ -279,3 +279,66 @@ impl WorshipPadPlayer {
     }
 }
 
+/// Synthesizes an 8-second seamless 120 BPM 4-bar backing track (C–G–Am–F) with drums and bass.
+pub fn synthesize_demo_backing_track() -> SampleData {
+    let sample_rate = 44_100_u32;
+    let total_frames = (sample_rate * 8) as usize; // 4 bars at 120 BPM (2.0s per bar)
+    let mut frames = Vec::with_capacity(total_frames);
+
+    // Bass root MIDI notes per bar: C2 (36), G2 (43), A2 (45), F2 (41).
+    let bar_roots = [36_u8, 43, 45, 41];
+    let mut rng: u32 = 0x1234_5678;
+    let mut next_noise = || -> f32 {
+        rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        ((rng >> 9) as f32 / (u32::MAX >> 9) as f32) * 2.0 - 1.0
+    };
+
+    for i in 0..total_frames {
+        let t = i as f32 / sample_rate as f32;
+        let bar_idx = ((t / 2.0) as usize).min(3);
+        let bar_t = t - (bar_idx as f32 * 2.0);
+        let beat_t = bar_t % 0.5; // 120 BPM quarter note = 0.5s
+        let eighth_t = bar_t % 0.25;
+
+        let noise = next_noise();
+
+        // Kick on beats 1 & 3 (bar_t 0.0 and 1.0)
+        let kick_t = bar_t % 1.0;
+        let kick_env = (-kick_t * 16.0).exp();
+        let kick_freq = 48.0 + 95.0 * (-kick_t * 35.0).exp();
+        let kick = (TAU * kick_freq * kick_t).sin() * kick_env * 0.45;
+
+        // Snare on beats 2 & 4 (bar_t 0.5 and 1.5)
+        let snare_t = if bar_t >= 0.5 { (bar_t - 0.5) % 1.0 } else { 1.0 };
+        let snare = if snare_t < 0.25 {
+            let env = (-snare_t * 24.0).exp();
+            let body = (TAU * 185.0 * snare_t).sin() * 0.4;
+            (noise * 0.45 + body) * env * 0.28
+        } else {
+            0.0
+        };
+
+        // Closed hi-hat on 8th notes
+        let hat_env = (-eighth_t * 65.0).exp();
+        let hat = noise * hat_env * 0.09;
+
+        // Warm bass playing 8th-note pulse
+        let root_hz = 440.0 * 2.0_f32.powf((bar_roots[bar_idx] as f32 - 69.0) / 12.0);
+        let bass_atk = (beat_t / 0.01).min(1.0);
+        let bass_dec = (-beat_t * 2.8).exp();
+        let bass = ((TAU * root_hz * t).sin() + 0.3 * (TAU * root_hz * 2.0 * t).sin())
+            * bass_atk
+            * bass_dec
+            * 0.26;
+
+        let mix = (kick + snare + hat + bass).clamp(-0.95, 0.95);
+        frames.push([mix, mix]);
+    }
+
+    SampleData {
+        frames,
+        sample_rate,
+        loop_region: None,
+    }
+}
+

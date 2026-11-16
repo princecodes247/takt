@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::audio::{open_output_stream, AudioStreamConfig, AudioStreamHandle};
-use crate::backing::{BackingTrackPlayer, WorshipPadPlayer};
+use crate::backing::{synthesize_demo_backing_track, BackingTrackPlayer, WorshipPadPlayer};
 use crate::midi::{open_midi_input, MidiEvent, MidiInputHandle};
 use crate::sampler::{decode_audio_bytes, load_built_in_banks, SampleBank, SampleData};
 use crate::voice::VoicePool;
@@ -105,12 +105,12 @@ impl TaktEngine {
             is_playing: Arc::new(AtomicBool::new(false)),
             active_voices: Arc::new(AtomicUsize::new(0)),
             midi_active_notes: Arc::new([AtomicU64::new(0), AtomicU64::new(0)]),
-            current_track: None,
-            current_track_name: None,
+            current_track: Some(Arc::new(synthesize_demo_backing_track())),
+            current_track_name: Some("Demo Groove · 120 BPM (C)".to_string()),
             track_tx,
             reclaim_track_rx,
             track_playing: Arc::new(AtomicBool::new(false)),
-            track_looping: Arc::new(AtomicBool::new(false)),
+            track_looping: Arc::new(AtomicBool::new(true)),
             track_volume: Arc::new(AtomicU32::new(0.75_f32.to_bits())),
             track_position_ms: Arc::new(AtomicU32::new(0)),
             track_seek_frame: Arc::new(AtomicI64::new(-1)),
