@@ -236,7 +236,16 @@ impl VoicePool {
                 any_active = true;
                 let frac = (v.position - pos_idx as f64) as f32;
                 let s0 = frames[pos_idx];
-                let s1 = frames[(pos_idx + 1).min(frames.len() - 1)];
+                let next_idx = if let Some((loop_start, loop_end)) = zone.sample.loop_region {
+                    if v.state != VoiceState::Releasing && pos_idx + 1 >= loop_end {
+                        loop_start
+                    } else {
+                        (pos_idx + 1).min(frames.len() - 1)
+                    }
+                } else {
+                    (pos_idx + 1).min(frames.len() - 1)
+                };
+                let s1 = frames[next_idx];
                 let sample_l = s0[0] + (s1[0] - s0[0]) * frac;
                 let sample_r = s0[1] + (s1[1] - s0[1]) * frac;
 

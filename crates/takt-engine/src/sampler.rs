@@ -351,14 +351,26 @@ fn synth_pad_sample(note: u8, sample_rate: u32) -> SampleData {
         let sub = 0.35 * (TAU * freq * 0.5 * t).sin();
         let shimmer = 0.15 * (TAU * freq * 2.0 * t).sin();
 
-        let left = (d1 * 0.45 + d2 * 0.35 + sub + shimmer) * attack * 0.45;
-        let right = (d3 * 0.45 + d2 * 0.35 + sub + shimmer) * attack * 0.45;
+        let left = (d1 * 0.45 + d2 * 0.35 + sub + shimmer) * attack * 0.32;
+        let right = (d3 * 0.45 + d2 * 0.35 + sub + shimmer) * attack * 0.32;
         frames.push([left, right]);
     }
 
-    // Loop the sustained middle section so held pad notes never cut off.
+    // Loop the sustained middle section with an equal-power crossfade so held pad notes never click.
     let loop_start = (sample_rate as f32 * 0.5) as usize;
     let loop_end = (sample_rate as f32 * 2.5) as usize;
+    let xfade = ((sample_rate as f32 * 0.25) as usize).min(loop_start);
+
+    for k in 0..xfade {
+        let theta = (k as f32 / xfade as f32) * std::f32::consts::FRAC_PI_2;
+        let fade_out = theta.cos();
+        let fade_in = theta.sin();
+        let tail_idx = loop_end - xfade + k;
+        let pre_idx = loop_start - xfade + k;
+        frames[tail_idx][0] = frames[tail_idx][0] * fade_out + frames[pre_idx][0] * fade_in;
+        frames[tail_idx][1] = frames[tail_idx][1] * fade_out + frames[pre_idx][1] * fade_in;
+    }
+    frames[loop_end] = frames[loop_start];
 
     SampleData {
         frames,
@@ -405,6 +417,16 @@ mod tests {
         let banks = load_built_in_banks(None);
         assert_eq!(banks.len(), 3);
         assert!(banks.iter().all(|b| b.find_zone_index(60).is_some()));
+    }
+
+    #[test]
+    fn synth_pad_loop_boundary_is_continuous() {
+        let pad = synth_pad_sample(60, 44_100);
+        let (loop_start, loop_end) = pad.loop_region.expect("pad should have loop region");
+        let diff_l = (pad.frames[loop_end - 1][0] - pad.frames[loop_start][0]).abs();
+        let diff_r = (pad.frames[loop_end - 1][1] - pad.frames[loop_start][1]).abs();
+        assert!(diff_l < 0.02, "left loop jump too large: {diff_l}");
+        assert!(diff_r < 0.02, "right loop jump too large: {diff_r}");
     }
 }
 
