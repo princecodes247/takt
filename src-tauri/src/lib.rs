@@ -19,6 +19,13 @@ enum EngineCmd {
     Panic(Reply<StatusDto>),
     TestNote(u8, bool, u8),
     MidiDevicesChanged,
+    LoadBackingTrack(String, Vec<u8>, String, Reply<StatusDto>),
+    SetBackingTrackPlaying(bool, Reply<StatusDto>),
+    SetBackingTrackLoop(bool, Reply<StatusDto>),
+    SetBackingTrackVolume(f32),
+    SeekBackingTrack(u32),
+    SetWorshipPad(bool, i8, Reply<StatusDto>),
+    SetWorshipPadVolume(f32),
 }
 
 struct AppState {
@@ -54,6 +61,15 @@ struct StatusDto {
     master_volume: f32,
     is_playing: bool,
     active_voices: usize,
+    backing_track_name: Option<String>,
+    backing_track_playing: bool,
+    backing_track_loop: bool,
+    backing_track_volume: f32,
+    backing_track_position_ms: u32,
+    backing_track_duration_ms: u32,
+    worship_pad_enabled: bool,
+    worship_pad_key: i8,
+    worship_pad_volume: f32,
 }
 
 #[derive(Serialize, Clone)]
@@ -73,6 +89,9 @@ struct TelemetryDto {
     estimated_latency_ms: f32,
     midi_device: Option<String>,
     active_midi_notes: Vec<u8>,
+    backing_track_playing: bool,
+    backing_track_position_ms: u32,
+    backing_track_duration_ms: u32,
 }
 
 fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
@@ -87,6 +106,15 @@ fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
         master_volume: st.master_volume,
         is_playing: st.is_playing,
         active_voices: st.active_voices,
+        backing_track_name: st.backing_track_name,
+        backing_track_playing: st.backing_track_playing,
+        backing_track_loop: st.backing_track_loop,
+        backing_track_volume: st.backing_track_volume,
+        backing_track_position_ms: st.backing_track_position_ms,
+        backing_track_duration_ms: st.backing_track_duration_ms,
+        worship_pad_enabled: st.worship_pad_enabled,
+        worship_pad_key: st.worship_pad_key,
+        worship_pad_volume: st.worship_pad_volume,
     }
 }
 
@@ -182,6 +210,85 @@ fn trigger_test_note(
         .map_err(|_| "engine thread stopped".to_string())
 }
 
+#[tauri::command]
+fn load_backing_track(
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<StatusDto, String> {
+    let name = request
+        .headers()
+        .get("x-track-name")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .unwrap_or_else(|| "Track.wav".to_string());
+    let ext = std::path::Path::new(&name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("wav")
+        .to_lowercase();
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(data) => data.clone(),
+        tauri::ipc::InvokeBody::Json(_) => {
+            return Err("expected raw binary audio payload".to_string());
+        }
+    };
+    call_engine(&state.tx, |reply| {
+        EngineCmd::LoadBackingTrack(name, bytes, ext, reply)
+    })
+}
+
+#[tauri::command]
+fn set_backing_track_playing(
+    state: State<'_, AppState>,
+    playing: bool,
+) -> Result<StatusDto, String> {
+    call_engine(&state.tx, |reply| {
+        EngineCmd::SetBackingTrackPlaying(playing, reply)
+    })
+}
+
+#[tauri::command]
+fn set_backing_track_loop(state: State<'_, AppState>, looping: bool) -> Result<StatusDto, String> {
+    call_engine(&state.tx, |reply| {
+        EngineCmd::SetBackingTrackLoop(looping, reply)
+    })
+}
+
+#[tauri::command]
+fn set_backing_track_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::SetBackingTrackVolume(volume))
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
+#[tauri::command]
+fn seek_backing_track(state: State<'_, AppState>, position_ms: u32) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::SeekBackingTrack(position_ms))
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
+#[tauri::command]
+fn set_worship_pad(
+    state: State<'_, AppState>,
+    enabled: bool,
+    key: i8,
+) -> Result<StatusDto, String> {
+    call_engine(&state.tx, |reply| {
+        EngineCmd::SetWorshipPad(enabled, key, reply)
+    })
+}
+
+#[tauri::command]
+fn set_worship_pad_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::SetWorshipPadVolume(volume))
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
 pub fn run() {
     let (tx, rx) = mpsc::channel::<EngineCmd>();
     let watcher_tx = tx.clone();
@@ -267,6 +374,34 @@ pub fn run() {
                         EngineCmd::MidiDevicesChanged => {
                             *midi_changed = true;
                         }
+                        EngineCmd::LoadBackingTrack(name, bytes, ext, reply) => {
+                            let res = engine
+                                .load_backing_track_bytes(name, bytes, &ext)
+                                .map(|_| to_status_dto(&mut engine))
+                                .map_err(|e| e.to_string());
+                            let _ = reply.send(res);
+                        }
+                        EngineCmd::SetBackingTrackPlaying(playing, reply) => {
+                            engine.set_backing_track_playing(playing);
+                            let _ = reply.send(Ok(to_status_dto(&mut engine)));
+                        }
+                        EngineCmd::SetBackingTrackLoop(looping, reply) => {
+                            engine.set_backing_track_loop(looping);
+                            let _ = reply.send(Ok(to_status_dto(&mut engine)));
+                        }
+                        EngineCmd::SetBackingTrackVolume(vol) => {
+                            engine.set_backing_track_volume(vol);
+                        }
+                        EngineCmd::SeekBackingTrack(ms) => {
+                            engine.seek_backing_track_ms(ms);
+                        }
+                        EngineCmd::SetWorshipPad(enabled, key, reply) => {
+                            engine.set_worship_pad(enabled, key);
+                            let _ = reply.send(Ok(to_status_dto(&mut engine)));
+                        }
+                        EngineCmd::SetWorshipPadVolume(vol) => {
+                            engine.set_worship_pad_volume(vol);
+                        }
                     };
 
                     if let Some(cmd) = pending_cmd.take() {
@@ -301,6 +436,9 @@ pub fn run() {
                                 estimated_latency_ms: st.estimated_latency_ms,
                                 midi_device: st.midi_device,
                                 active_midi_notes: st.active_midi_notes,
+                                backing_track_playing: st.backing_track_playing,
+                                backing_track_position_ms: st.backing_track_position_ms,
+                                backing_track_duration_ms: st.backing_track_duration_ms,
                             },
                         );
                     }
@@ -324,6 +462,13 @@ pub fn run() {
             set_volume,
             panic_all_notes_off,
             trigger_test_note,
+            load_backing_track,
+            set_backing_track_playing,
+            set_backing_track_loop,
+            set_backing_track_volume,
+            seek_backing_track,
+            set_worship_pad,
+            set_worship_pad_volume,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Takt");

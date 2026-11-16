@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod backing;
 pub mod engine;
 pub mod midi;
 pub mod sampler;

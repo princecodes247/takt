@@ -523,3 +523,152 @@ input[type="range"] {
   opacity: 0.7;
 }
 
+.module-card {
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.module-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.module-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-mini {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 650;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.btn-mini:hover:not(:disabled) {
+  border-color: #6b768f;
+}
+
+.btn-mini:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn-mini.active {
+  border-color: var(--accent);
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--accent);
+}
+
+.track-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+.track-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-time {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.module-sliders {
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  align-items: center;
+  gap: 10px;
+}
+
+.mini-vol {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.mini-vol input[type="range"] {
+  width: 68px;
+}
+
+.pad-key-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.pad-key-btn {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 650;
+  padding: 5px 0;
+  cursor: pointer;
+  transition: border-color 100ms ease, background-color 100ms ease, color 100ms ease;
+}
+
+.pad-key-btn:hover {
+  border-color: #6b768f;
+  color: var(--text-primary);
+}
+
+.pad-key-btn.selected {
+  border-color: #5b657a;
+  color: var(--text-primary);
+}
+
+.pad-key-btn.active {
+  border-color: var(--accent);
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.chord-badge {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  padding: 3px 14px;
+  min-width: 84px;
+  text-align: center;
+  border-radius: 7px;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.chord-badge.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(245, 158, 11, 0.12);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+

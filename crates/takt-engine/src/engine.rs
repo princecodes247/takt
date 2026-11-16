@@ -1,12 +1,13 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicI8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::audio::{open_output_stream, AudioStreamConfig, AudioStreamHandle};
+use crate::backing::{BackingTrackPlayer, WorshipPadPlayer};
 use crate::midi::{open_midi_input, MidiEvent, MidiInputHandle};
-use crate::sampler::{load_built_in_banks, SampleBank};
+use crate::sampler::{decode_audio_bytes, load_built_in_banks, SampleBank, SampleData};
 use crate::voice::VoicePool;
 use crate::EngineError;
 
@@ -34,6 +35,15 @@ pub struct EngineStatus {
     pub is_playing: bool,
     pub active_voices: usize,
     pub active_midi_notes: Vec<u8>,
+    pub backing_track_name: Option<String>,
+    pub backing_track_playing: bool,
+    pub backing_track_loop: bool,
+    pub backing_track_volume: f32,
+    pub backing_track_position_ms: u32,
+    pub backing_track_duration_ms: u32,
+    pub worship_pad_enabled: bool,
+    pub worship_pad_key: i8,
+    pub worship_pad_volume: f32,
 }
 
 /// Coordinates MIDI input, sample bank loading, and the real-time audio stream.
@@ -51,6 +61,20 @@ pub struct TaktEngine {
     is_playing: Arc<AtomicBool>,
     active_voices: Arc<AtomicUsize>,
     midi_active_notes: Arc<[AtomicU64; 2]>,
+    // Backing track state
+    current_track: Option<Arc<SampleData>>,
+    current_track_name: Option<String>,
+    track_tx: Producer<Arc<SampleData>>,
+    reclaim_track_rx: Consumer<Arc<SampleData>>,
+    track_playing: Arc<AtomicBool>,
+    track_looping: Arc<AtomicBool>,
+    track_volume: Arc<AtomicU32>,
+    track_position_ms: Arc<AtomicU32>,
+    track_seek_frame: Arc<AtomicI64>,
+    // Worship pad state
+    pad_enabled: Arc<AtomicBool>,
+    pad_key: Arc<AtomicI8>,
+    pad_volume: Arc<AtomicU32>,
 }
 
 impl TaktEngine {
@@ -64,6 +88,8 @@ impl TaktEngine {
         let (ctrl_tx, _ctrl_rx) = RingBuffer::new(CTRL_QUEUE_CAP);
         let (bank_tx, _bank_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (_reclaim_tx, reclaim_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (track_tx, _track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (_reclaim_track_tx, reclaim_track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
 
         let mut engine = Self {
             banks,
@@ -79,6 +105,18 @@ impl TaktEngine {
             is_playing: Arc::new(AtomicBool::new(false)),
             active_voices: Arc::new(AtomicUsize::new(0)),
             midi_active_notes: Arc::new([AtomicU64::new(0), AtomicU64::new(0)]),
+            current_track: None,
+            current_track_name: None,
+            track_tx,
+            reclaim_track_rx,
+            track_playing: Arc::new(AtomicBool::new(false)),
+            track_looping: Arc::new(AtomicBool::new(false)),
+            track_volume: Arc::new(AtomicU32::new(0.75_f32.to_bits())),
+            track_position_ms: Arc::new(AtomicU32::new(0)),
+            track_seek_frame: Arc::new(AtomicI64::new(-1)),
+            pad_enabled: Arc::new(AtomicBool::new(false)),
+            pad_key: Arc::new(AtomicI8::new(0)),
+            pad_volume: Arc::new(AtomicU32::new(0.55_f32.to_bits())),
         };
 
         engine.restart_audio_stream()?;
@@ -163,6 +201,55 @@ impl TaktEngine {
         let _ = self.ctrl_tx.push(event);
     }
 
+    /// Decodes and loads a backing track (WAV, FLAC, OGG) into memory and queues it to the audio thread.
+    pub fn load_backing_track_bytes(
+        &mut self,
+        name: String,
+        bytes: Vec<u8>,
+        extension: &str,
+    ) -> Result<(), EngineError> {
+        let sample = Arc::new(decode_audio_bytes(bytes, extension)?);
+        self.drain_reclaimed_banks();
+        self.track_playing.store(false, Ordering::Relaxed);
+        self.track_position_ms.store(0, Ordering::Relaxed);
+        self.current_track = Some(Arc::clone(&sample));
+        self.current_track_name = Some(name);
+        let _ = self.track_tx.push(sample);
+        Ok(())
+    }
+
+    pub fn set_backing_track_playing(&self, playing: bool) {
+        if self.current_track.is_some() {
+            self.track_playing.store(playing, Ordering::Relaxed);
+        }
+    }
+
+    pub fn set_backing_track_loop(&self, looping: bool) {
+        self.track_looping.store(looping, Ordering::Relaxed);
+    }
+
+    pub fn set_backing_track_volume(&self, volume: f32) {
+        self.track_volume
+            .store(volume.clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn seek_backing_track_ms(&self, ms: u32) {
+        if let Some(track) = &self.current_track {
+            let frame = ((ms as f64 / 1000.0) * track.sample_rate as f64) as i64;
+            self.track_seek_frame.store(frame, Ordering::Release);
+        }
+    }
+
+    pub fn set_worship_pad(&self, enabled: bool, key: i8) {
+        self.pad_key.store(key.clamp(0, 11), Ordering::Relaxed);
+        self.pad_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn set_worship_pad_volume(&self, volume: f32) {
+        self.pad_volume
+            .store(volume.clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
+    }
+
     pub fn status(&mut self) -> EngineStatus {
         self.drain_reclaimed_banks();
         let (audio_device, sample_rate, buffer_size, estimated_latency_ms) =
@@ -186,6 +273,12 @@ impl TaktEngine {
             }
         }
 
+        let backing_track_duration_ms = self
+            .current_track
+            .as_ref()
+            .map(|t| (t.frames.len() as f64 / t.sample_rate as f64 * 1000.0) as u32)
+            .unwrap_or(0);
+
         EngineStatus {
             audio_device,
             sample_rate,
@@ -197,12 +290,24 @@ impl TaktEngine {
             is_playing: self.is_playing.load(Ordering::Relaxed),
             active_voices: self.active_voices.load(Ordering::Relaxed),
             active_midi_notes,
+            backing_track_name: self.current_track_name.clone(),
+            backing_track_playing: self.track_playing.load(Ordering::Relaxed),
+            backing_track_loop: self.track_looping.load(Ordering::Relaxed),
+            backing_track_volume: f32::from_bits(self.track_volume.load(Ordering::Relaxed)),
+            backing_track_position_ms: self.track_position_ms.load(Ordering::Relaxed),
+            backing_track_duration_ms,
+            worship_pad_enabled: self.pad_enabled.load(Ordering::Relaxed),
+            worship_pad_key: self.pad_key.load(Ordering::Relaxed),
+            worship_pad_volume: f32::from_bits(self.pad_volume.load(Ordering::Relaxed)),
         }
     }
 
     fn drain_reclaimed_banks(&mut self) {
         while let Ok(old_bank) = self.reclaim_rx.pop() {
             drop(old_bank);
+        }
+        while let Ok(old_track) = self.reclaim_track_rx.pop() {
+            drop(old_track);
         }
     }
 
@@ -214,14 +319,33 @@ impl TaktEngine {
         let (ctrl_tx, mut ctrl_rx) = RingBuffer::new(CTRL_QUEUE_CAP);
         let (bank_tx, mut bank_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (mut reclaim_tx, reclaim_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (track_tx, track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (reclaim_track_tx, reclaim_track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
 
         self.midi_tx = Some(midi_tx);
         self.ctrl_tx = ctrl_tx;
         self.bank_tx = bank_tx;
         self.reclaim_rx = reclaim_rx;
+        self.track_tx = track_tx;
+        self.reclaim_track_rx = reclaim_track_rx;
 
         let mut active_bank = Arc::clone(&self.banks[self.active_bank_idx]);
         let mut pool = VoicePool::default();
+        let mut backing_player = BackingTrackPlayer::new(
+            self.current_track.clone(),
+            track_rx,
+            reclaim_track_tx,
+            Arc::clone(&self.track_playing),
+            Arc::clone(&self.track_looping),
+            Arc::clone(&self.track_volume),
+            Arc::clone(&self.track_position_ms),
+            Arc::clone(&self.track_seek_frame),
+        );
+        let mut worship_pad = WorshipPadPlayer::new(
+            Arc::clone(&self.pad_key),
+            Arc::clone(&self.pad_enabled),
+            Arc::clone(&self.pad_volume),
+        );
         let volume_atomic = Arc::clone(&self.master_volume);
         let playing_atomic = Arc::clone(&self.is_playing);
         let voices_atomic = Arc::clone(&self.active_voices);
@@ -266,9 +390,11 @@ impl TaktEngine {
                 pool.handle_event(ev, &active_bank, sample_rate);
             }
 
-            // 3. Render active voices.
+            // 3. Render active voices, backing track, and worship pad.
             let master_vol = f32::from_bits(volume_atomic.load(Ordering::Relaxed));
             let any_active = pool.render(output, channels, sample_rate, master_vol, &active_bank);
+            backing_player.render_into(output, channels, sample_rate);
+            worship_pad.render_into(output, channels, sample_rate);
             playing_atomic.store(any_active, Ordering::Relaxed);
             voices_atomic.store(pool.active_voice_count(), Ordering::Relaxed);
         })?;

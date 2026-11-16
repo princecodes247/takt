@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { detectChord } from "./chord";
 
 interface AudioDeviceDto {
   name: string;
@@ -25,6 +26,15 @@ interface StatusDto {
   masterVolume: number;
   isPlaying: boolean;
   activeVoices: number;
+  backingTrackName: string | null;
+  backingTrackPlaying: boolean;
+  backingTrackLoop: boolean;
+  backingTrackVolume: number;
+  backingTrackPositionMs: number;
+  backingTrackDurationMs: number;
+  worshipPadEnabled: boolean;
+  worshipPadKey: number;
+  worshipPadVolume: number;
 }
 
 interface InitialStateDto {
@@ -40,6 +50,31 @@ interface TelemetryDto {
   estimatedLatencyMs: number;
   midiDevice: string | null;
   activeMidiNotes: number[];
+  backingTrackPlaying: boolean;
+  backingTrackPositionMs: number;
+  backingTrackDurationMs: number;
+}
+
+const WORSHIP_KEYS = [
+  "C",
+  "C#",
+  "D",
+  "Eb",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "Ab",
+  "A",
+  "Bb",
+  "B",
+];
+
+function formatTimeMs(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
 const DEFAULT_BUFFERS = [64, 128, 256, 512, 1024];
@@ -115,6 +150,7 @@ const WHITE_KEYS = FULL_PIANO_KEYS.filter((k) => !k.isBlack);
 const BLACK_KEYS = FULL_PIANO_KEYS.filter((k) => k.isBlack);
 
 const KEYBOARD_STORAGE_KEY = "takt:computer-keyboard";
+const CHORD_STORAGE_KEY = "takt:chord-detect";
 
 export default function App() {
   const [midiDevices, setMidiDevices] = useState<string[]>([]);
@@ -125,6 +161,14 @@ export default function App() {
   const [keyboardEnabled, setKeyboardEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(KEYBOARD_STORAGE_KEY);
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
+  });
+  const [chordDetectEnabled, setChordDetectEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(CHORD_STORAGE_KEY);
       return saved === null ? true : saved === "true";
     } catch {
       return true;
@@ -141,6 +185,7 @@ export default function App() {
   const activeKeyNotesRef = useRef<Map<string, number>>(new Map());
   const mousePressedRef = useRef<boolean>(false);
   const activeMouseNoteRef = useRef<number | null>(null);
+  const trackInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     invoke<InitialStateDto>("get_initial_state")
@@ -161,6 +206,9 @@ export default function App() {
               activeVoices: event.payload.activeVoices,
               estimatedLatencyMs: event.payload.estimatedLatencyMs,
               midiDevice: event.payload.midiDevice,
+              backingTrackPlaying: event.payload.backingTrackPlaying,
+              backingTrackPositionMs: event.payload.backingTrackPositionMs,
+              backingTrackDurationMs: event.payload.backingTrackDurationMs,
             }
           : prev
       );
@@ -297,6 +345,127 @@ export default function App() {
       window.removeEventListener("blur", releaseAllKeyboardNotes);
     };
   }, [keyboardEnabled, triggerKeyNote, releaseAllKeyboardNotes]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHORD_STORAGE_KEY, String(chordDetectEnabled));
+    } catch {
+      // ignore storage errors
+    }
+  }, [chordDetectEnabled]);
+
+  const detectedChord = useMemo(() => {
+    if (!chordDetectEnabled) return null;
+    const allNotes = new Set<number>(activeMidiNotes);
+    for (const n of activeKeyboardNotes) allNotes.add(n);
+    if (activeMouseNote !== null) allNotes.add(activeMouseNote);
+    return detectChord(allNotes);
+  }, [chordDetectEnabled, activeMidiNotes, activeKeyboardNotes, activeMouseNote]);
+
+  const handleTrackFileSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError(null);
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const next = await invoke<StatusDto>("load_backing_track", buf, {
+        headers: { "x-track-name": file.name },
+      });
+      setStatus(next);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleTrackPlayToggle = async () => {
+    if (!status?.backingTrackName) return;
+    setError(null);
+    try {
+      const next = await invoke<StatusDto>("set_backing_track_playing", {
+        playing: !status.backingTrackPlaying,
+      });
+      setStatus(next);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleTrackLoopToggle = async () => {
+    if (!status) return;
+    setError(null);
+    try {
+      const next = await invoke<StatusDto>("set_backing_track_loop", {
+        looping: !status.backingTrackLoop,
+      });
+      setStatus(next);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleTrackSeek = async (ms: number) => {
+    setStatus((prev) =>
+      prev ? { ...prev, backingTrackPositionMs: ms } : prev
+    );
+    try {
+      await invoke("seek_backing_track", { positionMs: ms });
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleTrackVolumeChange = async (pct: number) => {
+    const volume = pct / 100;
+    setStatus((prev) =>
+      prev ? { ...prev, backingTrackVolume: volume } : prev
+    );
+    try {
+      await invoke("set_backing_track_volume", { volume });
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleWorshipPadToggle = async () => {
+    if (!status) return;
+    setError(null);
+    try {
+      const next = await invoke<StatusDto>("set_worship_pad", {
+        enabled: !status.worshipPadEnabled,
+        key: status.worshipPadKey,
+      });
+      setStatus(next);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleWorshipPadKey = async (key: number) => {
+    if (!status) return;
+    setError(null);
+    try {
+      const next = await invoke<StatusDto>("set_worship_pad", {
+        enabled: true,
+        key,
+      });
+      setStatus(next);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleWorshipPadVolume = async (pct: number) => {
+    const volume = pct / 100;
+    setStatus((prev) => (prev ? { ...prev, worshipPadVolume: volume } : prev));
+    try {
+      await invoke("set_worship_pad_volume", { volume });
+    } catch (err) {
+      setError(String(err));
+    }
+  };
 
   const currentAudioDevice = audioDevices.find(
     (d) => d.name === status?.audioDevice
@@ -506,16 +675,161 @@ export default function App() {
         </div>
       </section>
 
-      <section className="keyboard-section">
-        <div className="keyboard-header">
-          <div className="keyboard-title-group">
-            <label>Computer Keyboard</label>
-            <span className="keyboard-hint">
-              {keyboardEnabled ? "Z / X octave · A–' play" : "Disabled"}
+      <section className="grid-2">
+        <div className="module-card">
+          <div className="module-header">
+            <label>Backing Track</label>
+            <div className="module-actions">
+              <input
+                ref={trackInputRef}
+                type="file"
+                accept=".wav,.flac,.ogg,audio/wav,audio/flac,audio/ogg"
+                style={{ display: "none" }}
+                onChange={handleTrackFileSelected}
+              />
+              <button
+                type="button"
+                className="btn-mini"
+                onClick={() => trackInputRef.current?.click()}
+              >
+                Load Audio
+              </button>
+              <button
+                type="button"
+                className={`btn-mini ${status?.backingTrackLoop ? "active" : ""}`}
+                onClick={handleTrackLoopToggle}
+                title="Loop Backing Track"
+              >
+                Loop
+              </button>
+              <button
+                type="button"
+                className={`btn-mini ${status?.backingTrackPlaying ? "active" : ""}`}
+                onClick={handleTrackPlayToggle}
+                disabled={!status?.backingTrackName}
+              >
+                {status?.backingTrackPlaying ? "Pause" : "Play"}
+              </button>
+            </div>
+          </div>
+
+          <div className="track-meta">
+            <span className="track-name" title={status?.backingTrackName ?? ""}>
+              {status?.backingTrackName ?? "No track loaded (WAV / FLAC / OGG)"}
+            </span>
+            <span className="track-time">
+              {formatTimeMs(status?.backingTrackPositionMs ?? 0)} /{" "}
+              {formatTimeMs(status?.backingTrackDurationMs ?? 0)}
             </span>
           </div>
 
+          <div className="module-sliders">
+            <input
+              type="range"
+              aria-label="Backing Track Seek"
+              min={0}
+              max={Math.max(1, status?.backingTrackDurationMs ?? 0)}
+              value={status?.backingTrackPositionMs ?? 0}
+              disabled={!status?.backingTrackName}
+              onChange={(e) => handleTrackSeek(Number(e.target.value))}
+            />
+            <div className="mini-vol">
+              <span>Vol</span>
+              <input
+                type="range"
+                aria-label="Backing Track Volume"
+                min={0}
+                max={125}
+                value={Math.round((status?.backingTrackVolume ?? 0.75) * 100)}
+                onChange={(e) =>
+                  handleTrackVolumeChange(Number(e.target.value))
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="module-card">
+          <div className="module-header">
+            <label>Worship Pad</label>
+            <div className="module-actions">
+              <div className="mini-vol">
+                <span>Vol</span>
+                <input
+                  type="range"
+                  aria-label="Worship Pad Volume"
+                  min={0}
+                  max={125}
+                  value={Math.round((status?.worshipPadVolume ?? 0.55) * 100)}
+                  onChange={(e) =>
+                    handleWorshipPadVolume(Number(e.target.value))
+                  }
+                />
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={status?.worshipPadEnabled ?? false}
+                className={`toggle-pill ${status?.worshipPadEnabled ? "on" : ""}`}
+                onClick={handleWorshipPadToggle}
+              >
+                <span className="toggle-dot" aria-hidden="true" />
+                <span>{status?.worshipPadEnabled ? "ON" : "OFF"}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="pad-key-grid" role="group" aria-label="Worship Pad Key">
+            {WORSHIP_KEYS.map((label, idx) => {
+              const active =
+                status?.worshipPadEnabled && status?.worshipPadKey === idx;
+              const selected = status?.worshipPadKey === idx;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  className={`pad-key-btn ${active ? "active" : selected ? "selected" : ""}`}
+                  onClick={() => handleWorshipPadKey(idx)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="keyboard-section">
+        <div className="keyboard-header">
+          <div className="keyboard-title-group">
+            <label>Keyboard</label>
+            <span className="keyboard-hint">
+              {keyboardEnabled ? "Z / X octave · A–' play" : "Computer keys off"}
+            </span>
+          </div>
+
+          {chordDetectEnabled && (
+            <div
+              className={`chord-badge ${detectedChord ? "active" : ""}`}
+              aria-live="polite"
+            >
+              {detectedChord ?? "—"}
+            </div>
+          )}
+
           <div className="keyboard-controls">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={chordDetectEnabled}
+              className={`toggle-pill ${chordDetectEnabled ? "on" : ""}`}
+              onClick={() => setChordDetectEnabled((v) => !v)}
+              title="Toggle Chord Detection"
+            >
+              <span className="toggle-dot" aria-hidden="true" />
+              <span>CHORD</span>
+            </button>
+
             <div className="octave-stepper" aria-label="Keyboard Octave">
               <button
                 type="button"
@@ -546,7 +860,7 @@ export default function App() {
               onClick={() => setKeyboardEnabled((v) => !v)}
             >
               <span className="toggle-dot" aria-hidden="true" />
-              <span>{keyboardEnabled ? "ON" : "OFF"}</span>
+              <span>{keyboardEnabled ? "KEYS ON" : "KEYS OFF"}</span>
             </button>
           </div>
         </div>

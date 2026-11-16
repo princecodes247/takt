@@ -14,9 +14,9 @@
       {
         "title": "Takt",
         "width": 1160,
-        "height": 580,
+        "height": 700,
         "minWidth": 900,
-        "minHeight": 480,
+        "minHeight": 580,
         "resizable": true
       }
     ],
