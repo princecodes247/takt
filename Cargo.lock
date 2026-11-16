@@ -3641,6 +3641,8 @@ dependencies = [
 name = "takt-engine"
 version = "0.1.0"
 dependencies = [
+ "core-foundation",
+ "coremidi",
  "cpal",
  "midir",
  "rtrb",

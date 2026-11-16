@@ -1,11 +1,11 @@
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Sender};
-use std::time::Duration;
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use takt_engine::audio::list_output_devices;
 use takt_engine::engine::TaktEngine;
-use takt_engine::midi::{list_midi_devices, MidiEvent};
+use takt_engine::midi::{list_midi_devices, MidiDeviceWatcher, MidiEvent};
 use tauri::{Emitter, State};
 
 type Reply<T> = mpsc::SyncSender<Result<T, String>>;
@@ -17,7 +17,8 @@ enum EngineCmd {
     SelectSound(String, Reply<StatusDto>),
     SetVolume(f32),
     Panic(Reply<StatusDto>),
-    TestNote(u8, bool),
+    TestNote(u8, bool, u8),
+    MidiDevicesChanged,
 }
 
 struct AppState {
@@ -167,15 +168,22 @@ fn panic_all_notes_off(state: State<'_, AppState>) -> Result<StatusDto, String> 
 }
 
 #[tauri::command]
-fn trigger_test_note(state: State<'_, AppState>, note: u8, down: bool) -> Result<(), String> {
+fn trigger_test_note(
+    state: State<'_, AppState>,
+    note: u8,
+    down: bool,
+    velocity: Option<u8>,
+) -> Result<(), String> {
+    let vel = velocity.unwrap_or(100).min(127);
     state
         .tx
-        .send(EngineCmd::TestNote(note, down))
+        .send(EngineCmd::TestNote(note, down, vel))
         .map_err(|_| "engine thread stopped".to_string())
 }
 
 pub fn run() {
     let (tx, rx) = mpsc::channel::<EngineCmd>();
+    let watcher_tx = tx.clone();
 
     tauri::Builder::default()
         .manage(AppState { tx })
@@ -186,73 +194,89 @@ pub fn run() {
                 let dir_opt = samples_dir.exists().then_some(samples_dir.as_path());
                 let mut engine = TaktEngine::new(dir_opt).expect("failed to initialize TaktEngine");
 
+                let _midi_watcher = MidiDeviceWatcher::new(move || {
+                    let _ = watcher_tx.send(EngineCmd::MidiDevicesChanged);
+                })
+                .ok();
+
                 let mut last_midi_list = collect_midi_names();
-                let mut tick: u32 = 0;
+                let telemetry_interval = Duration::from_millis(50);
+                let mut last_telemetry = Instant::now();
+                let mut pending_cmd: Option<EngineCmd> = None;
 
                 loop {
-                    while let Ok(cmd) = rx.try_recv() {
-                        match cmd {
-                            EngineCmd::GetInitialState(reply) => {
-                                let sounds = engine
-                                    .sounds()
-                                    .into_iter()
-                                    .map(|s| SoundDto {
-                                        id: s.id,
-                                        name: s.name,
-                                    })
-                                    .collect();
-                                let _ = reply.send(Ok(InitialStateDto {
-                                    midi_devices: collect_midi_names(),
-                                    audio_devices: collect_audio_devices(),
-                                    sounds,
-                                    status: to_status_dto(&mut engine),
-                                }));
-                            }
-                            EngineCmd::SelectMidi(name, reply) => {
-                                let res = engine
-                                    .select_midi_input(name)
-                                    .map(|_| to_status_dto(&mut engine))
-                                    .map_err(|e| e.to_string());
-                                let _ = reply.send(res);
-                            }
-                            EngineCmd::SelectAudio(name, buf, reply) => {
-                                let res = engine
-                                    .select_audio_output(name, buf)
-                                    .map(|_| to_status_dto(&mut engine))
-                                    .map_err(|e| e.to_string());
-                                let _ = reply.send(res);
-                            }
-                            EngineCmd::SelectSound(id, reply) => {
-                                let res = engine
-                                    .select_sound(&id)
-                                    .map(|_| to_status_dto(&mut engine))
-                                    .map_err(|e| e.to_string());
-                                let _ = reply.send(res);
-                            }
-                            EngineCmd::SetVolume(vol) => {
-                                engine.set_master_volume(vol);
-                            }
-                            EngineCmd::Panic(reply) => {
-                                engine.panic();
-                                let _ = reply.send(Ok(to_status_dto(&mut engine)));
-                            }
-                            EngineCmd::TestNote(note, down) => {
-                                let event = if down {
-                                    MidiEvent::NoteOn {
-                                        channel: 0,
-                                        note,
-                                        velocity: 100,
-                                    }
-                                } else {
-                                    MidiEvent::NoteOff { channel: 0, note }
-                                };
-                                engine.inject_midi_event(event);
-                            }
+                    let mut midi_changed = false;
+                    let mut process_cmd = |cmd: EngineCmd, midi_changed: &mut bool| match cmd {
+                        EngineCmd::GetInitialState(reply) => {
+                            let sounds = engine
+                                .sounds()
+                                .into_iter()
+                                .map(|s| SoundDto {
+                                    id: s.id,
+                                    name: s.name,
+                                })
+                                .collect();
+                            let _ = reply.send(Ok(InitialStateDto {
+                                midi_devices: collect_midi_names(),
+                                audio_devices: collect_audio_devices(),
+                                sounds,
+                                status: to_status_dto(&mut engine),
+                            }));
                         }
-                    }
+                        EngineCmd::SelectMidi(name, reply) => {
+                            let res = engine
+                                .select_midi_input(name)
+                                .map(|_| to_status_dto(&mut engine))
+                                .map_err(|e| e.to_string());
+                            let _ = reply.send(res);
+                        }
+                        EngineCmd::SelectAudio(name, buf, reply) => {
+                            let res = engine
+                                .select_audio_output(name, buf)
+                                .map(|_| to_status_dto(&mut engine))
+                                .map_err(|e| e.to_string());
+                            let _ = reply.send(res);
+                        }
+                        EngineCmd::SelectSound(id, reply) => {
+                            let res = engine
+                                .select_sound(&id)
+                                .map(|_| to_status_dto(&mut engine))
+                                .map_err(|e| e.to_string());
+                            let _ = reply.send(res);
+                        }
+                        EngineCmd::SetVolume(vol) => {
+                            engine.set_master_volume(vol);
+                        }
+                        EngineCmd::Panic(reply) => {
+                            engine.panic();
+                            let _ = reply.send(Ok(to_status_dto(&mut engine)));
+                        }
+                        EngineCmd::TestNote(note, down, velocity) => {
+                            let event = if down {
+                                MidiEvent::NoteOn {
+                                    channel: 0,
+                                    note,
+                                    velocity,
+                                }
+                            } else {
+                                MidiEvent::NoteOff { channel: 0, note }
+                            };
+                            engine.inject_midi_event(event);
+                        }
+                        EngineCmd::MidiDevicesChanged => {
+                            *midi_changed = true;
+                        }
+                    };
 
-                    tick = tick.wrapping_add(1);
-                    if tick % 10 == 0 {
+                    if let Some(cmd) = pending_cmd.take() {
+                        process_cmd(cmd, &mut midi_changed);
+                    }
+                    while let Ok(cmd) = rx.try_recv() {
+                        process_cmd(cmd, &mut midi_changed);
+                    }
+                    drop(process_cmd);
+
+                    if midi_changed {
                         let current_midi = collect_midi_names();
                         if current_midi != last_midi_list {
                             last_midi_list = current_midi.clone();
@@ -265,18 +289,26 @@ pub fn run() {
                         }
                     }
 
-                    let st = engine.status();
-                    let _ = app_handle.emit(
-                        "takt://telemetry",
-                        TelemetryDto {
-                            is_playing: st.is_playing,
-                            active_voices: st.active_voices,
-                            estimated_latency_ms: st.estimated_latency_ms,
-                            midi_device: st.midi_device,
-                        },
-                    );
+                    if last_telemetry.elapsed() >= telemetry_interval {
+                        last_telemetry = Instant::now();
+                        let st = engine.status();
+                        let _ = app_handle.emit(
+                            "takt://telemetry",
+                            TelemetryDto {
+                                is_playing: st.is_playing,
+                                active_voices: st.active_voices,
+                                estimated_latency_ms: st.estimated_latency_ms,
+                                midi_device: st.midi_device,
+                            },
+                        );
+                    }
 
-                    std::thread::sleep(Duration::from_millis(50));
+                    let wait = telemetry_interval.saturating_sub(last_telemetry.elapsed());
+                    match rx.recv_timeout(wait) {
+                        Ok(cmd) => pending_cmd = Some(cmd),
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    }
                 }
             });
             Ok(())

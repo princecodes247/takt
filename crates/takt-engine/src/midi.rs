@@ -143,6 +143,162 @@ where
     })
 }
 
+#[cfg(target_os = "macos")]
+mod watcher {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    };
+    use std::thread::{self, JoinHandle};
+
+    use core_foundation::runloop::CFRunLoop;
+    use coremidi::{Client, Notification};
+
+    use crate::EngineError;
+
+    /// Event-driven macOS CoreMIDI topology watcher (zero polling).
+    pub struct MidiDeviceWatcher {
+        run_loop: CFRunLoop,
+        stopped: Arc<AtomicBool>,
+        handle: Option<JoinHandle<()>>,
+    }
+
+    impl MidiDeviceWatcher {
+        pub fn new<F>(mut on_change: F) -> Result<Self, EngineError>
+        where
+            F: FnMut() + Send + 'static,
+        {
+            let stopped = Arc::new(AtomicBool::new(false));
+            let stopped_thread = Arc::clone(&stopped);
+            let (tx, rx) = mpsc::sync_channel::<Result<CFRunLoop, String>>(1);
+
+            let handle = thread::Builder::new()
+                .name("takt-midi-watcher".to_string())
+                .spawn(move || {
+                    let run_loop = CFRunLoop::get_current();
+                    let client = Client::new_with_notifications(
+                        "takt-midi-watcher",
+                        move |notification: &Notification| match notification {
+                            Notification::ObjectAdded(_)
+                            | Notification::ObjectRemoved(_)
+                            | Notification::SetupChanged
+                            | Notification::PropertyChanged(_) => {
+                                on_change();
+                            }
+                            _ => {}
+                        },
+                    );
+
+                    match client {
+                        Ok(_client) => {
+                            let _ = tx.send(Ok(run_loop));
+                            if !stopped_thread.load(Ordering::Acquire) {
+                                CFRunLoop::run_current();
+                            }
+                        }
+                        Err(status) => {
+                            let _ = tx.send(Err(format!(
+                                "failed to create CoreMIDI notification client (OSStatus {status})"
+                            )));
+                        }
+                    }
+                })
+                .map_err(|e| EngineError::StreamError(format!("failed to spawn MIDI watcher: {e}")))?;
+
+            let run_loop = rx
+                .recv()
+                .map_err(|_| EngineError::StreamError("MIDI watcher thread exited early".to_string()))?
+                .map_err(EngineError::StreamError)?;
+
+            Ok(Self {
+                run_loop,
+                stopped,
+                handle: Some(handle),
+            })
+        }
+    }
+
+    impl Drop for MidiDeviceWatcher {
+        fn drop(&mut self) {
+            self.stopped.store(true, Ordering::Release);
+            self.run_loop.stop();
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod watcher {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::thread::{self, JoinHandle};
+    use std::time::Duration;
+
+    use super::list_midi_devices;
+    use crate::EngineError;
+
+    /// Fallback polling MIDI device watcher for non-macOS platforms.
+    pub struct MidiDeviceWatcher {
+        stopped: Arc<AtomicBool>,
+        handle: Option<JoinHandle<()>>,
+    }
+
+    impl MidiDeviceWatcher {
+        pub fn new<F>(mut on_change: F) -> Result<Self, EngineError>
+        where
+            F: FnMut() + Send + 'static,
+        {
+            let stopped = Arc::new(AtomicBool::new(false));
+            let stopped_thread = Arc::clone(&stopped);
+            let handle = thread::Builder::new()
+                .name("takt-midi-watcher".to_string())
+                .spawn(move || {
+                    let mut last: Vec<String> = list_midi_devices()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|d| d.name)
+                        .collect();
+                    while !stopped_thread.load(Ordering::Acquire) {
+                        thread::sleep(Duration::from_secs(1));
+                        if stopped_thread.load(Ordering::Acquire) {
+                            break;
+                        }
+                        let current: Vec<String> = list_midi_devices()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|d| d.name)
+                            .collect();
+                        if current != last {
+                            last = current;
+                            on_change();
+                        }
+                    }
+                })
+                .map_err(|e| EngineError::StreamError(format!("failed to spawn MIDI watcher: {e}")))?;
+
+            Ok(Self {
+                stopped,
+                handle: Some(handle),
+            })
+        }
+    }
+
+    impl Drop for MidiDeviceWatcher {
+        fn drop(&mut self) {
+            self.stopped.store(true, Ordering::Release);
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+pub use watcher::MidiDeviceWatcher;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +373,12 @@ mod tests {
                 value: -8192
             })
         );
+    }
+
+    #[test]
+    fn midi_device_watcher_starts_and_drops_cleanly() {
+        let watcher = MidiDeviceWatcher::new(|| {}).expect("watcher should start");
+        drop(watcher);
     }
 }
 

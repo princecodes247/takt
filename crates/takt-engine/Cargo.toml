@@ -11,3 +11,7 @@ rtrb = "0.3"
 symphonia = { version = "0.5", features = ["wav", "flac", "ogg", "vorbis", "pcm"] }
 thiserror = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+coremidi = "0.9"
+
