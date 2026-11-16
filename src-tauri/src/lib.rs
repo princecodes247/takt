@@ -6,7 +6,7 @@ use serde::Serialize;
 use takt_engine::audio::list_output_devices;
 use takt_engine::engine::TaktEngine;
 use takt_engine::midi::{list_midi_devices, MidiDeviceWatcher, MidiEvent};
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 type Reply<T> = mpsc::SyncSender<Result<T, String>>;
 
@@ -297,10 +297,21 @@ pub fn run() {
         .manage(AppState { tx })
         .setup(move |app| {
             let app_handle = app.handle().clone();
+            let samples_dir = [
+                Some(PathBuf::from("assets/samples")),
+                Some(PathBuf::from("../assets/samples")),
+                app.path()
+                    .resource_dir()
+                    .ok()
+                    .map(|p| p.join("assets/samples")),
+            ]
+            .into_iter()
+            .flatten()
+            .find(|p| p.exists());
+
             std::thread::spawn(move || {
-                let samples_dir = PathBuf::from("assets/samples");
-                let dir_opt = samples_dir.exists().then_some(samples_dir.as_path());
-                let mut engine = TaktEngine::new(dir_opt).expect("failed to initialize TaktEngine");
+                let mut engine = TaktEngine::new(samples_dir.as_deref())
+                    .expect("failed to initialize TaktEngine");
 
                 let _midi_watcher = MidiDeviceWatcher::new(move || {
                     let _ = watcher_tx.send(EngineCmd::MidiDevicesChanged);

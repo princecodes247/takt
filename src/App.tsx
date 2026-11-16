@@ -667,7 +667,9 @@ export default function App() {
                 className={`sound-pad ${selected ? "selected" : ""}`}
                 onClick={() => handleSoundSelect(sound.id)}
               >
-                <span className="sound-pad-meta">0{idx + 1}</span>
+                <span className="sound-pad-meta">
+                  {String(idx + 1).padStart(2, "0")}
+                </span>
                 <span className="sound-pad-title">{sound.name}</span>
               </button>
             );

@@ -165,18 +165,19 @@ fn decode_media_stream(
     })
 }
 
-/// Returns the 3 built-in starter sound banks (Grand Piano, Electric Piano, Synth Pad).
+/// Returns the built-in sound banks (Model D Grand, Model D Warm, Electric Piano, Synth Pad).
 ///
 /// If WAV files exist under `samples_dir/<id>/<note>.wav`, they are decoded via `symphonia`;
 /// otherwise, built-in synthesized multi-zone starter samples are generated in memory.
 pub fn load_built_in_banks(samples_dir: Option<&Path>) -> Vec<SampleBank> {
     let specs = [
-        ("piano", "Grand Piano", 45.0_f32),
+        ("model-d", "Model D Grand", 65.0_f32),
+        ("model-d-warm", "Model D Warm", 85.0_f32),
         ("epiano", "Electric Piano", 55.0_f32),
         ("pad", "Synth Pad", 180.0_f32),
     ];
 
-    specs
+    let mut banks: Vec<SampleBank> = specs
         .into_iter()
         .map(|(id, name, release_ms)| {
             if let Some(dir) = samples_dir {
@@ -187,7 +188,54 @@ pub fn load_built_in_banks(samples_dir: Option<&Path>) -> Vec<SampleBank> {
             }
             synthesize_starter_bank(id, name, release_ms)
         })
-        .collect()
+        .collect();
+
+    // Also discover any custom voice subdirectories under `samples_dir` (e.g. `model-d-concert`).
+    if let Some(dir) = samples_dir {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut extra_dirs: Vec<(String, std::path::PathBuf)> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let path = e.path();
+                    if !path.is_dir() {
+                        return None;
+                    }
+                    let id = path.file_name()?.to_str()?.to_string();
+                    if specs.iter().any(|(builtin_id, _, _)| *builtin_id == id) {
+                        return None;
+                    }
+                    Some((id, path))
+                })
+                .collect();
+            extra_dirs.sort_by(|a, b| a.0.cmp(&b.0));
+
+            for (id, path) in extra_dirs {
+                let display = format_voice_display_name(&id);
+                if let Some(bank) = try_load_dir_bank(&id, &display, 75.0, &path) {
+                    banks.push(bank);
+                }
+            }
+        }
+    }
+
+    banks
+}
+
+fn format_voice_display_name(id: &str) -> String {
+    id.split(['-', '_'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            if part.eq_ignore_ascii_case("md") {
+                return "Model D".to_string();
+            }
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn try_load_dir_bank(
@@ -255,14 +303,20 @@ fn build_zones_from_roots(roots: Vec<(u8, SampleData)>) -> Vec<SampleZone> {
 
 fn synthesize_starter_bank(id: &str, name: &str, release_ms: f32) -> SampleBank {
     let sample_rate = 44_100;
-    let root_notes = [36_u8, 48, 60, 72, 84];
+    let root_notes: &[u8] = match id {
+        "model-d" | "model-d-warm" => &[24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90],
+        _ => &[36, 48, 60, 72, 84],
+    };
     let roots = root_notes
-        .into_iter()
+        .iter()
+        .copied()
         .map(|note| {
             let sample = match id {
+                "model-d" => synth_model_d_sample(note, sample_rate, 1.0),
+                "model-d-warm" => synth_model_d_sample(note, sample_rate, 0.48),
                 "epiano" => synth_epiano_sample(note, sample_rate),
                 "pad" => synth_pad_sample(note, sample_rate),
-                _ => synth_piano_sample(note, sample_rate),
+                _ => synth_model_d_sample(note, sample_rate, 1.0),
             };
             (note, sample)
         })
@@ -280,25 +334,88 @@ fn midi_note_to_hz(note: u8) -> f32 {
     440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
 }
 
-fn synth_piano_sample(note: u8, sample_rate: u32) -> SampleData {
-    let duration_secs = 2.5_f32;
+/// Physical-inspired Steinway Model D Concert Grand synthesis with string inharmonicity,
+/// 3-string unison beating, hammer-felt transient, and stereo soundboard imaging.
+fn synth_model_d_sample(note: u8, sample_rate: u32, brightness: f32) -> SampleData {
+    let register = ((note as f32 - 21.0) / 87.0).clamp(0.0, 1.0);
+    let duration_secs = 4.2 - register * 2.0; // Bass rings longer than treble
     let total = (sample_rate as f32 * duration_secs) as usize;
     let freq = midi_note_to_hz(note);
+
+    // String stiffness inharmonicity coefficient B (higher in treble, subtle in bass)
+    let inharm_b = 0.000035 * 2.0_f32.powf((note as f32 - 60.0) / 16.0);
+    let max_partials: usize = if note < 45 {
+        14
+    } else if note < 70 {
+        10
+    } else {
+        6
+    };
+
+    // Precompute partial frequencies (with inharmonicity) and amplitudes
+    let nyquist = sample_rate as f32 * 0.45;
+    let mut partials: Vec<(f32, f32, f32)> = Vec::with_capacity(max_partials);
+    for n in 1..=max_partials {
+        let nf = n as f32;
+        let stretched_freq = nf * freq * (1.0 + inharm_b * nf * nf).sqrt();
+        if stretched_freq >= nyquist {
+            break;
+        }
+        // Bass notes have a slightly softer fundamental and richer 2nd-5th partials
+        let bass_boost = if n == 1 && note < 48 { 0.72 } else { 1.0 };
+        let rolloff = (1.0 / nf.powf(1.18 + (1.0 - brightness) * 0.55)) * bass_boost;
+        let decay_rate = (0.75 + register * 1.45) * (1.0 + (nf - 1.0) * 0.48);
+        partials.push((stretched_freq, rolloff, decay_rate));
+    }
+
+    // Stereo soundboard pan: bass slightly left, treble slightly right
+    let pan = (register - 0.5) * 0.42;
+    let gain_l = (0.5 * (1.0 - pan)).sqrt();
+    let gain_r = (0.5 * (1.0 + pan)).sqrt();
+
+    // Deterministic noise for hammer felt thump
+    let mut rng: u32 = 0x9E37_79B9_u32.wrapping_add(note as u32 * 7919);
+    let mut next_noise = || -> f32 {
+        rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        ((rng >> 9) as f32 / (u32::MAX >> 9) as f32) * 2.0 - 1.0
+    };
+
     let mut frames = Vec::with_capacity(total);
+    let unison_detune_l = 0.99955_f32; // ~0.78 cents flat
+    let unison_detune_r = 1.00045_f32; // ~0.78 cents sharp
 
     for i in 0..total {
         let t = i as f32 / sample_rate as f32;
-        let attack = (t / 0.004).min(1.0);
-        let decay = (-t * 2.4).exp();
-        let bright_decay = (-t * 7.5).exp();
+        let attack = (t / 0.0025).min(1.0);
+        // Two-stage piano envelope: fast prompt soundboard bloom + singing aftersound
+        let prompt_env = 0.38 * (-t * (4.5 + register * 3.0)).exp() + 0.62;
 
-        let fundamental = (TAU * freq * t).sin();
-        let h2 = 0.45 * (TAU * freq * 2.0 * t).sin() * bright_decay;
-        let h3 = 0.22 * (TAU * freq * 3.0 * t).sin() * bright_decay;
-        let h4 = 0.10 * (TAU * freq * 4.0 * t).sin() * (-t * 12.0).exp();
+        let mut sum_l = 0.0_f32;
+        let mut sum_r = 0.0_f32;
+        for &(pf, amp, dec) in &partials {
+            let env = (-t * dec).exp();
+            let s_c = (TAU * pf * t).sin();
+            let s_l = (TAU * pf * unison_detune_l * t).sin();
+            let s_r = (TAU * pf * unison_detune_r * t).sin();
+            sum_l += (s_c * 0.65 + s_l * 0.35) * amp * env;
+            sum_r += (s_c * 0.65 + s_r * 0.35) * amp * env;
+        }
 
-        let mono = (fundamental + h2 + h3 + h4) * attack * decay * 0.55;
-        frames.push([mono, mono]);
+        // Brief wool-felt hammer strike transient (~12ms)
+        let hammer = if t < 0.015 {
+            let h_env = (-t * 280.0).exp();
+            let thump = (TAU * (110.0 + register * 180.0) * t).sin();
+            (thump * 0.6 + next_noise() * 0.25 * brightness) * h_env * 0.14
+        } else {
+            0.0
+        };
+
+        // Smooth tail fade in final 40ms so non-looped notes never cut abruptly
+        let tail_fade = ((duration_secs - t) / 0.04).clamp(0.0, 1.0);
+        let scale = attack * prompt_env * tail_fade * 0.55;
+        let left = (sum_l * scale + hammer) * gain_l;
+        let right = (sum_r * scale + hammer) * gain_r;
+        frames.push([left, right]);
     }
 
     SampleData {
@@ -413,9 +530,9 @@ mod tests {
     }
 
     #[test]
-    fn built_in_banks_include_three_sounds() {
+    fn built_in_banks_include_four_sounds() {
         let banks = load_built_in_banks(None);
-        assert_eq!(banks.len(), 3);
+        assert_eq!(banks.len(), 4);
         assert!(banks.iter().all(|b| b.find_zone_index(60).is_some()));
     }
 
