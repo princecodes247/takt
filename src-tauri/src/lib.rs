@@ -50,6 +50,7 @@ struct SoundDto {
     id: String,
     name: String,
     category: String,
+    supported_params: Vec<&'static str>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -404,6 +405,7 @@ pub fn run() {
                                     id: s.id,
                                     name: s.name,
                                     category: s.category,
+                                    supported_params: s.supported_params,
                                 })
                                 .collect();
                             let _ = reply.send(Ok(InitialStateDto {

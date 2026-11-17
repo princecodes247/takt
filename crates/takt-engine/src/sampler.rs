@@ -182,6 +182,7 @@ pub struct LazySampleBank {
     pub id: String,
     pub name: String,
     pub category: String,
+    pub supported_params: Vec<&'static str>,
     pub release_ms: f32,
     pub source_dir: Option<PathBuf>,
     pub loaded: Option<Arc<SampleBank>>,
@@ -224,6 +225,7 @@ pub fn discover_banks(samples_dir: Option<&Path>) -> Vec<LazySampleBank> {
                 id: id.to_string(),
                 name: name.to_string(),
                 category: category.to_string(),
+                supported_params: supported_params_for(id, category),
                 release_ms,
                 source_dir,
                 loaded: None,
@@ -256,9 +258,11 @@ pub fn discover_banks(samples_dir: Option<&Path>) -> Vec<LazySampleBank> {
                 let (meta_name, meta_cat) = read_meta_txt(&path);
                 let name = meta_name.unwrap_or_else(|| format_voice_display_name(&id));
                 let category = meta_cat.unwrap_or_else(|| infer_voice_category(&id));
+                let supported_params = supported_params_for(&id, &category);
                 banks.push(LazySampleBank {
                     name,
                     category,
+                    supported_params,
                     id,
                     release_ms: 75.0,
                     source_dir: Some(path),
@@ -303,6 +307,47 @@ fn infer_voice_category(id: &str) -> String {
     } else {
         "Custom".to_string()
     }
+}
+
+fn supported_params_for(id: &str, category: &str) -> Vec<&'static str> {
+    let is_hammered = matches!(
+        category,
+        "Model D" | "Acoustic Pianos" | "Electric Pianos" | "GS · Piano" | "GS · Chromatic"
+    ) || id.contains("piano")
+        || id.contains("epiano")
+        || id.contains("harpsichord")
+        || id.contains("clav");
+
+    if is_hammered {
+        return vec![
+            "hammer",
+            "brightness",
+            "attack",
+            "release",
+            "offset",
+            "veltrack",
+            "reverb",
+            "width",
+        ];
+    }
+
+    if category == "GS · Organ" {
+        return vec!["brightness", "attack", "release", "reverb", "width"];
+    }
+
+    if category == "GS · Drums" {
+        return vec!["brightness", "release", "veltrack", "reverb", "width"];
+    }
+
+    // Plucked, strings, brass, winds, synths, pads
+    vec![
+        "brightness",
+        "attack",
+        "release",
+        "veltrack",
+        "reverb",
+        "width",
+    ]
 }
 
 fn has_sample_files(dir: &Path) -> bool {

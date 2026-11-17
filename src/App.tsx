@@ -15,6 +15,7 @@ interface SoundDto {
   id: string;
   name: string;
   category: string;
+  supportedParams: string[];
 }
 
 interface StatusDto {
@@ -408,6 +409,11 @@ export default function App() {
   const activeSound = useMemo(
     () => sounds.find((s) => s.id === status?.activeSoundId) ?? null,
     [sounds, status?.activeSoundId]
+  );
+
+  const supportedParams = useMemo(
+    () => new Set(activeSound?.supportedParams ?? []),
+    [activeSound]
   );
 
   const detectedChord = useMemo(() => {
@@ -810,156 +816,176 @@ export default function App() {
         </div>
 
         <div className="params-strip" aria-label="Voice Shaping">
-          <div className="param-item">
-            <div className="param-head">
-              <span>Hammer</span>
-              <span>
-                {Math.round((status?.soundParams.hammerHardness ?? 0.5) * 100)}%
-              </span>
+          {supportedParams.has("hammer") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Hammer</span>
+                <span>
+                  {Math.round((status?.soundParams.hammerHardness ?? 0.5) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(
+                  (status?.soundParams.hammerHardness ?? 0.5) * 100
+                )}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    hammerHardness: Number(e.target.value) / 100,
+                  })
+                }
+              />
             </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(
-                (status?.soundParams.hammerHardness ?? 0.5) * 100
-              )}
-              onChange={(e) =>
-                handleSoundParamChange({
-                  hammerHardness: Number(e.target.value) / 100,
-                })
-              }
-            />
-          </div>
+          )}
 
-          <div className="param-item">
-            <div className="param-head">
-              <span>Tone</span>
-              <span>
-                {Math.round((status?.soundParams.brightness ?? 1) * 100)}%
-              </span>
+          {supportedParams.has("brightness") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Tone</span>
+                <span>
+                  {Math.round((status?.soundParams.brightness ?? 1) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round((status?.soundParams.brightness ?? 1) * 100)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    brightness: Number(e.target.value) / 100,
+                  })
+                }
+              />
             </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round((status?.soundParams.brightness ?? 1) * 100)}
-              onChange={(e) =>
-                handleSoundParamChange({ brightness: Number(e.target.value) / 100 })
-              }
-            />
-          </div>
+          )}
 
-          <div className="param-item">
-            <div className="param-head">
-              <span>Attack</span>
-              <span>{Math.round(status?.soundParams.attackMs ?? 0)} ms</span>
+          {supportedParams.has("attack") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Attack</span>
+                <span>{Math.round(status?.soundParams.attackMs ?? 0)} ms</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={300}
+                value={Math.round(status?.soundParams.attackMs ?? 0)}
+                onChange={(e) =>
+                  handleSoundParamChange({ attackMs: Number(e.target.value) })
+                }
+              />
             </div>
-            <input
-              type="range"
-              min={0}
-              max={300}
-              value={Math.round(status?.soundParams.attackMs ?? 0)}
-              onChange={(e) =>
-                handleSoundParamChange({ attackMs: Number(e.target.value) })
-              }
-            />
-          </div>
+          )}
 
-          <div className="param-item">
-            <div className="param-head">
-              <span>Release</span>
-              <span>{Math.round(status?.soundParams.releaseMs ?? 85)} ms</span>
+          {supportedParams.has("release") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Release</span>
+                <span>{Math.round(status?.soundParams.releaseMs ?? 85)} ms</span>
+              </div>
+              <input
+                type="range"
+                min={20}
+                max={1200}
+                step={5}
+                value={Math.round(status?.soundParams.releaseMs ?? 85)}
+                onChange={(e) =>
+                  handleSoundParamChange({ releaseMs: Number(e.target.value) })
+                }
+              />
             </div>
-            <input
-              type="range"
-              min={20}
-              max={1200}
-              step={5}
-              value={Math.round(status?.soundParams.releaseMs ?? 85)}
-              onChange={(e) =>
-                handleSoundParamChange({ releaseMs: Number(e.target.value) })
-              }
-            />
-          </div>
+          )}
 
-          <div className="param-item">
-            <div className="param-head">
-              <span>Offset</span>
-              <span>
-                {Math.round(status?.soundParams.sampleOffsetMs ?? 0)} ms
-              </span>
+          {supportedParams.has("offset") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Offset</span>
+                <span>
+                  {Math.round(status?.soundParams.sampleOffsetMs ?? 0)} ms
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={Math.round(status?.soundParams.sampleOffsetMs ?? 0)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    sampleOffsetMs: Number(e.target.value),
+                  })
+                }
+              />
             </div>
-            <input
-              type="range"
-              min={0}
-              max={40}
-              value={Math.round(status?.soundParams.sampleOffsetMs ?? 0)}
-              onChange={(e) =>
-                handleSoundParamChange({
-                  sampleOffsetMs: Number(e.target.value),
-                })
-              }
-            />
-          </div>
+          )}
 
-          <div className="param-item">
-            <div className="param-head">
-              <span>Veltrack</span>
-              <span>
-                {Math.round((status?.soundParams.velTrack ?? 0.88) * 100)}%
-              </span>
+          {supportedParams.has("veltrack") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Veltrack</span>
+                <span>
+                  {Math.round((status?.soundParams.velTrack ?? 0.88) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round((status?.soundParams.velTrack ?? 0.88) * 100)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    velTrack: Number(e.target.value) / 100,
+                  })
+                }
+              />
             </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round((status?.soundParams.velTrack ?? 0.88) * 100)}
-              onChange={(e) =>
-                handleSoundParamChange({
-                  velTrack: Number(e.target.value) / 100,
-                })
-              }
-            />
-          </div>
+          )}
 
-          <div className="param-item">
-            <div className="param-head">
-              <span>Reverb</span>
-              <span>
-                {Math.round((status?.soundParams.reverbMix ?? 0.15) * 100)}%
-              </span>
+          {supportedParams.has("reverb") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Reverb</span>
+                <span>
+                  {Math.round((status?.soundParams.reverbMix ?? 0.15) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={70}
+                value={Math.round((status?.soundParams.reverbMix ?? 0.15) * 100)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    reverbMix: Number(e.target.value) / 100,
+                  })
+                }
+              />
             </div>
-            <input
-              type="range"
-              min={0}
-              max={70}
-              value={Math.round((status?.soundParams.reverbMix ?? 0.15) * 100)}
-              onChange={(e) =>
-                handleSoundParamChange({ reverbMix: Number(e.target.value) / 100 })
-              }
-            />
-          </div>
+          )}
 
-          <div className="param-item">
-            <div className="param-head">
-              <span>Width</span>
-              <span>
-                {Math.round((status?.soundParams.stereoWidth ?? 1) * 100)}%
-              </span>
+          {supportedParams.has("width") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Width</span>
+                <span>
+                  {Math.round((status?.soundParams.stereoWidth ?? 1) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={150}
+                value={Math.round((status?.soundParams.stereoWidth ?? 1) * 100)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    stereoWidth: Number(e.target.value) / 100,
+                  })
+                }
+              />
             </div>
-            <input
-              type="range"
-              min={0}
-              max={150}
-              value={Math.round((status?.soundParams.stereoWidth ?? 1) * 100)}
-              onChange={(e) =>
-                handleSoundParamChange({
-                  stereoWidth: Number(e.target.value) / 100,
-                })
-              }
-            />
-          </div>
+          )}
 
           <button
             type="button"

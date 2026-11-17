@@ -266,6 +266,8 @@ pub struct VoicePool {
     age_counter: u64,
     lp_l: f32,
     lp_r: f32,
+    bark_lp_l: f32,
+    bark_lp_r: f32,
     reverb: Box<StereoReverb>,
 }
 
@@ -280,6 +282,8 @@ impl Default for VoicePool {
             age_counter: 0,
             lp_l: 0.0,
             lp_r: 0.0,
+            bark_lp_l: 0.0,
+            bark_lp_r: 0.0,
             reverb: Box::default(),
         }
     }
@@ -311,7 +315,7 @@ impl VoicePool {
                 velocity,
             } => {
                 let effective_vel =
-                    (velocity as f32 + (params.hammer_hardness - 0.5) * 70.0).clamp(1.0, 127.0) as u8;
+                    (velocity as f32 + (params.hammer_hardness - 0.5) * 90.0).clamp(1.0, 127.0) as u8;
                 let Some(zone_idx) = bank.find_zone_index(note, effective_vel) else {
                     return;
                 };
@@ -485,6 +489,15 @@ impl VoicePool {
         } else {
             1.0
         };
+        let use_bark = params.hammer_hardness > 0.51;
+        let bark_amount = ((params.hammer_hardness - 0.5) * 2.0).clamp(0.0, 1.0);
+        let bark_alpha = if use_bark {
+            let dt = 1.0 / sample_rate as f32;
+            let rc = 1.0 / (TAU * 1800.0);
+            (dt / (rc + dt)).clamp(0.01, 1.0)
+        } else {
+            1.0
+        };
         let use_reverb = params.reverb_mix > 0.001;
 
         for frame_idx in 0..num_frames {
@@ -567,6 +580,19 @@ impl VoicePool {
                         v.state = VoiceState::Idle;
                     }
                 }
+            }
+
+            if use_bark {
+                self.bark_lp_l += bark_alpha * (mix_l - self.bark_lp_l);
+                self.bark_lp_r += bark_alpha * (mix_r - self.bark_lp_r);
+                let hi_l = mix_l - self.bark_lp_l;
+                let hi_r = mix_r - self.bark_lp_r;
+                // Add upper-mid tine/hammer presence + subtle asymmetric harmonic bark
+                let drive = 1.0 + bark_amount * 1.4;
+                mix_l = (mix_l + hi_l * bark_amount * 1.35) * (1.0 - 0.12 * bark_amount)
+                    + (mix_l * drive).tanh() * (0.16 * bark_amount);
+                mix_r = (mix_r + hi_r * bark_amount * 1.35) * (1.0 - 0.12 * bark_amount)
+                    + (mix_r * drive).tanh() * (0.16 * bark_amount);
             }
 
             if use_lp {

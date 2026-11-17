@@ -21,6 +21,7 @@ pub struct SoundInfo {
     pub id: String,
     pub name: String,
     pub category: String,
+    pub supported_params: Vec<&'static str>,
 }
 
 /// Live telemetry snapshot from the engine.
@@ -134,6 +135,7 @@ impl TaktEngine {
                 id: b.id.clone(),
                 name: b.name.clone(),
                 category: b.category.clone(),
+                supported_params: b.supported_params.clone(),
             })
             .collect()
     }

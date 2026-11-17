@@ -770,8 +770,8 @@ input[type="range"] {
 }
 
 .params-strip {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   background: var(--bg-recessed);
@@ -781,6 +781,8 @@ input[type="range"] {
 }
 
 .param-item {
+  flex: 1 1 96px;
+  min-width: 96px;
   display: flex;
   flex-direction: column;
   gap: 4px;
