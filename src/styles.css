@@ -674,9 +674,9 @@ input[type="range"] {
 
 .params-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(8, minmax(0, 1fr)) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   background: var(--bg-recessed);
   border: 1px solid var(--border-subtle);
   border-radius: 10px;

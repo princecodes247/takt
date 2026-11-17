@@ -22,12 +22,15 @@ pub struct SampleData {
     pub loop_region: Option<(usize, usize)>,
 }
 
-/// Key-range mapping for a single sample inside a `SampleBank`.
+/// Key-range and velocity-range mapping for a single sample inside a `SampleBank`.
 #[derive(Debug, Clone)]
 pub struct SampleZone {
     pub min_note: u8,
     pub max_note: u8,
     pub root_note: u8,
+    pub min_vel: u8,
+    pub max_vel: u8,
+    pub root_vel: u8,
     pub sample: SampleData,
 }
 
@@ -41,18 +44,26 @@ pub struct SampleBank {
 }
 
 impl SampleBank {
-    /// Finds the best zone index for a given MIDI note.
-    pub fn find_zone_index(&self, note: u8) -> Option<usize> {
+    /// Finds the best zone index for a given MIDI note and velocity.
+    pub fn find_zone_index(&self, note: u8, velocity: u8) -> Option<usize> {
         self.zones
             .iter()
             .enumerate()
-            .find(|(_, z)| note >= z.min_note && note <= z.max_note)
+            .find(|(_, z)| {
+                note >= z.min_note
+                    && note <= z.max_note
+                    && velocity >= z.min_vel
+                    && velocity <= z.max_vel
+            })
             .map(|(idx, _)| idx)
             .or_else(|| {
                 self.zones
                     .iter()
                     .enumerate()
-                    .min_by_key(|(_, z)| (z.root_note as i16 - note as i16).abs())
+                    .min_by_key(|(_, z)| {
+                        (z.root_note as i32 - note as i32).abs() * 128
+                            + (z.root_vel as i32 - velocity as i32).abs()
+                    })
                     .map(|(idx, _)| idx)
             })
     }
@@ -238,6 +249,16 @@ fn format_voice_display_name(id: &str) -> String {
         .join(" ")
 }
 
+fn parse_sample_stem(stem: &str) -> Option<(u8, u8)> {
+    if let Some((note_str, vel_str)) = stem.split_once("_v") {
+        let note = note_str.parse::<u8>().ok()?;
+        let vel = vel_str.parse::<u8>().ok()?.clamp(1, 127);
+        return Some((note, vel));
+    }
+    let note = stem.parse::<u8>().ok()?;
+    Some((note, 100))
+}
+
 fn try_load_dir_bank(
     id: &str,
     name: &str,
@@ -245,7 +266,7 @@ fn try_load_dir_bank(
     dir: &Path,
 ) -> Option<SampleBank> {
     let entries = std::fs::read_dir(dir).ok()?;
-    let mut loaded: Vec<(u8, SampleData)> = Vec::new();
+    let mut loaded: Vec<(u8, u8, SampleData)> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -255,11 +276,11 @@ fn try_load_dir_bank(
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let Ok(root_note) = stem.parse::<u8>() else {
+        let Some((root_note, root_vel)) = parse_sample_stem(stem) else {
             continue;
         };
         if let Ok(sample) = decode_audio_file(&path) {
-            loaded.push((root_note, sample));
+            loaded.push((root_note, root_vel, sample));
         }
     }
 
@@ -267,8 +288,7 @@ fn try_load_dir_bank(
         return None;
     }
 
-    loaded.sort_by_key(|(note, _)| *note);
-    let zones = build_zones_from_roots(loaded);
+    let zones = build_zones_from_multi_roots(loaded);
     Some(SampleBank {
         id: id.to_string(),
         name: name.to_string(),
@@ -278,25 +298,65 @@ fn try_load_dir_bank(
 }
 
 fn build_zones_from_roots(roots: Vec<(u8, SampleData)>) -> Vec<SampleZone> {
-    let count = roots.len();
-    let mut zones = Vec::with_capacity(count);
-    for (i, (root_note, sample)) in roots.iter().enumerate() {
+    build_zones_from_multi_roots(
+        roots
+            .into_iter()
+            .map(|(note, sample)| (note, 100, sample))
+            .collect(),
+    )
+}
+
+fn build_zones_from_multi_roots(mut roots: Vec<(u8, u8, SampleData)>) -> Vec<SampleZone> {
+    roots.sort_by_key(|(note, vel, _)| (*note, *vel));
+
+    // Group by distinct root_note
+    let mut groups: Vec<(u8, Vec<(u8, SampleData)>)> = Vec::new();
+    for (note, vel, sample) in roots {
+        if let Some(last) = groups.last_mut() {
+            if last.0 == note {
+                last.1.push((vel, sample));
+                continue;
+            }
+        }
+        groups.push((note, vec![(vel, sample)]));
+    }
+
+    let count = groups.len();
+    let mut zones = Vec::new();
+    for (i, (root_note, vel_layers)) in groups.iter().enumerate() {
         let min_note = if i == 0 {
             0
         } else {
-            ((roots[i - 1].0 as u16 + *root_note as u16) / 2 + 1) as u8
+            ((groups[i - 1].0 as u16 + *root_note as u16) / 2 + 1) as u8
         };
         let max_note = if i + 1 == count {
             127
         } else {
-            ((*root_note as u16 + roots[i + 1].0 as u16) / 2) as u8
+            ((*root_note as u16 + groups[i + 1].0 as u16) / 2) as u8
         };
-        zones.push(SampleZone {
-            min_note,
-            max_note,
-            root_note: *root_note,
-            sample: sample.clone(),
-        });
+
+        let vcount = vel_layers.len();
+        for (vi, (root_vel, sample)) in vel_layers.iter().enumerate() {
+            let min_vel = if vi == 0 {
+                0
+            } else {
+                ((vel_layers[vi - 1].0 as u16 + *root_vel as u16) / 2 + 1) as u8
+            };
+            let max_vel = if vi + 1 == vcount {
+                127
+            } else {
+                ((*root_vel as u16 + vel_layers[vi + 1].0 as u16) / 2) as u8
+            };
+            zones.push(SampleZone {
+                min_note,
+                max_note,
+                root_note: *root_note,
+                min_vel,
+                max_vel,
+                root_vel: *root_vel,
+                sample: sample.clone(),
+            });
+        }
     }
     zones
 }
@@ -533,7 +593,30 @@ mod tests {
     fn built_in_banks_include_four_sounds() {
         let banks = load_built_in_banks(None);
         assert_eq!(banks.len(), 4);
-        assert!(banks.iter().all(|b| b.find_zone_index(60).is_some()));
+        assert!(banks.iter().all(|b| b.find_zone_index(60, 100).is_some()));
+    }
+
+    #[test]
+    fn multi_velocity_zones_partition_cleanly() {
+        let dummy = SampleData {
+            frames: vec![[0.1, 0.1]],
+            sample_rate: 44_100,
+            loop_region: None,
+        };
+        let zones = build_zones_from_multi_roots(vec![
+            (60, 30, dummy.clone()),
+            (60, 80, dummy.clone()),
+            (60, 120, dummy),
+        ]);
+        let bank = SampleBank {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            release_ms: 50.0,
+            zones,
+        };
+        assert_eq!(bank.zones[bank.find_zone_index(60, 20).unwrap()].root_vel, 30);
+        assert_eq!(bank.zones[bank.find_zone_index(60, 75).unwrap()].root_vel, 80);
+        assert_eq!(bank.zones[bank.find_zone_index(60, 115).unwrap()].root_vel, 120);
     }
 
     #[test]

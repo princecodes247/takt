@@ -59,6 +59,9 @@ struct SoundParamsDto {
     release_ms: f32,
     reverb_mix: f32,
     stereo_width: f32,
+    hammer_hardness: f32,
+    sample_offset_ms: f32,
+    vel_track: f32,
 }
 
 impl From<SoundParams> for SoundParamsDto {
@@ -69,6 +72,9 @@ impl From<SoundParams> for SoundParamsDto {
             release_ms: p.release_ms,
             reverb_mix: p.reverb_mix,
             stereo_width: p.stereo_width,
+            hammer_hardness: p.hammer_hardness,
+            sample_offset_ms: p.sample_offset_ms,
+            vel_track: p.vel_track,
         }
     }
 }
@@ -81,6 +87,9 @@ impl From<SoundParamsDto> for SoundParams {
             release_ms: p.release_ms,
             reverb_mix: p.reverb_mix,
             stereo_width: p.stereo_width,
+            hammer_hardness: p.hammer_hardness,
+            sample_offset_ms: p.sample_offset_ms,
+            vel_track: p.vel_track,
         }
     }
 }

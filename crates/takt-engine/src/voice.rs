@@ -22,6 +22,12 @@ pub struct SoundParams {
     pub reverb_mix: f32,
     /// Mid/side stereo width in `0.0..=1.5` (`1.0` = natural stereo).
     pub stereo_width: f32,
+    /// Hammer hardness in `0.0..=1.0` (`0.5` = neutral; shifts velocity layers & tone).
+    pub hammer_hardness: f32,
+    /// Sample start offset in milliseconds (`0.0..=40.0`) for faster touch response.
+    pub sample_offset_ms: f32,
+    /// Velocity-to-volume dynamic range in `0.0..=1.0` (`0.88` = natural piano dynamics).
+    pub vel_track: f32,
 }
 
 impl Default for SoundParams {
@@ -32,6 +38,9 @@ impl Default for SoundParams {
             release_ms: 85.0,
             reverb_mix: 0.15,
             stereo_width: 1.0,
+            hammer_hardness: 0.5,
+            sample_offset_ms: 0.0,
+            vel_track: 0.88,
         }
     }
 }
@@ -43,6 +52,9 @@ pub struct AtomicSoundParams {
     release_ms: AtomicU32,
     reverb_mix: AtomicU32,
     stereo_width: AtomicU32,
+    hammer_hardness: AtomicU32,
+    sample_offset_ms: AtomicU32,
+    vel_track: AtomicU32,
 }
 
 impl Default for AtomicSoundParams {
@@ -54,6 +66,9 @@ impl Default for AtomicSoundParams {
             release_ms: AtomicU32::new(d.release_ms.to_bits()),
             reverb_mix: AtomicU32::new(d.reverb_mix.to_bits()),
             stereo_width: AtomicU32::new(d.stereo_width.to_bits()),
+            hammer_hardness: AtomicU32::new(d.hammer_hardness.to_bits()),
+            sample_offset_ms: AtomicU32::new(d.sample_offset_ms.to_bits()),
+            vel_track: AtomicU32::new(d.vel_track.to_bits()),
         }
     }
 }
@@ -70,6 +85,12 @@ impl AtomicSoundParams {
             .store(p.reverb_mix.clamp(0.0, 0.7).to_bits(), Ordering::Relaxed);
         self.stereo_width
             .store(p.stereo_width.clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
+        self.hammer_hardness
+            .store(p.hammer_hardness.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.sample_offset_ms
+            .store(p.sample_offset_ms.clamp(0.0, 40.0).to_bits(), Ordering::Relaxed);
+        self.vel_track
+            .store(p.vel_track.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     pub fn load(&self) -> SoundParams {
@@ -79,6 +100,9 @@ impl AtomicSoundParams {
             release_ms: f32::from_bits(self.release_ms.load(Ordering::Relaxed)),
             reverb_mix: f32::from_bits(self.reverb_mix.load(Ordering::Relaxed)),
             stereo_width: f32::from_bits(self.stereo_width.load(Ordering::Relaxed)),
+            hammer_hardness: f32::from_bits(self.hammer_hardness.load(Ordering::Relaxed)),
+            sample_offset_ms: f32::from_bits(self.sample_offset_ms.load(Ordering::Relaxed)),
+            vel_track: f32::from_bits(self.vel_track.load(Ordering::Relaxed)),
         }
     }
 }
@@ -286,7 +310,9 @@ impl VoicePool {
                 note,
                 velocity,
             } => {
-                let Some(zone_idx) = bank.find_zone_index(note) else {
+                let effective_vel =
+                    (velocity as f32 + (params.hammer_hardness - 0.5) * 70.0).clamp(1.0, 127.0) as u8;
+                let Some(zone_idx) = bank.find_zone_index(note, effective_vel) else {
                     return;
                 };
                 // Re-trigger same note cleanly if already sounding on this channel.
@@ -300,11 +326,25 @@ impl VoicePool {
                 let slot = self.allocate_voice_slot();
                 self.age_counter = self.age_counter.wrapping_add(1);
                 let norm_vel = (velocity as f32 / 127.0).clamp(0.0, 1.0);
-                let velocity_gain = 0.12 + 0.88 * norm_vel.powf(1.4);
-                let (attack_gain, attack_step) = if params.attack_ms <= 0.5 {
+                let vel_track = params.vel_track.clamp(0.0, 1.0);
+                let velocity_gain = (1.0 - vel_track) + vel_track * norm_vel.powf(1.4);
+
+                let zone_sample = &bank.zones[zone_idx].sample;
+                let max_offset = zone_sample.frames.len().saturating_sub(2) as f64;
+                let position = (params.sample_offset_ms as f64 * 0.001 * zone_sample.sample_rate as f64)
+                    .clamp(0.0, max_offset);
+
+                let soft_hammer_attack = if params.hammer_hardness < 0.5 {
+                    (0.5 - params.hammer_hardness) * 12.0
+                } else {
+                    0.0
+                };
+                let offset_anti_click = if position > 0.0 { 2.0 } else { 0.0 };
+                let total_attack_ms = params.attack_ms.max(offset_anti_click) + soft_hammer_attack;
+                let (attack_gain, attack_step) = if total_attack_ms <= 0.5 {
                     (1.0, 1.0)
                 } else {
-                    (0.0, release_step_for_ms(params.attack_ms, sample_rate))
+                    (0.0, release_step_for_ms(total_attack_ms, sample_rate))
                 };
 
                 self.voices[slot] = Voice {
@@ -312,7 +352,7 @@ impl VoicePool {
                     channel,
                     note,
                     zone_idx,
-                    position: 0.0,
+                    position,
                     velocity_gain,
                     attack_gain,
                     attack_step,
@@ -430,9 +470,15 @@ impl VoicePool {
 
         let mut any_active = false;
         let lfo_inc = VIBRATO_RATE_HZ / sample_rate as f32;
-        let use_lp = params.brightness < 0.995;
+        let hammer_bright = if params.hammer_hardness < 0.5 {
+            0.35 + 1.3 * params.hammer_hardness
+        } else {
+            1.0
+        };
+        let eff_brightness = (params.brightness * hammer_bright).clamp(0.0, 1.0);
+        let use_lp = eff_brightness < 0.995;
         let lp_alpha = if use_lp {
-            let cutoff = 600.0 * (30.0_f32).powf(params.brightness.clamp(0.0, 1.0));
+            let cutoff = 600.0 * (30.0_f32).powf(eff_brightness);
             let dt = 1.0 / sample_rate as f32;
             let rc = 1.0 / (TAU * cutoff);
             (dt / (rc + dt)).clamp(0.01, 1.0)
@@ -667,6 +713,63 @@ mod tests {
         let mut buf = vec![0.0_f32; 1024 * 2];
         pool.render(&mut buf, 2, 44_100, 1.0, bank);
         assert_eq!(pool.active_voice_count(), 0);
+    }
+
+    #[test]
+    fn hammer_hardness_shifts_velocity_layer_selection() {
+        use crate::sampler::{SampleBank, SampleData, SampleZone};
+        let soft_sample = SampleData {
+            frames: vec![[0.2, 0.2]; 100],
+            sample_rate: 44_100,
+            loop_region: None,
+        };
+        let hard_sample = SampleData {
+            frames: vec![[0.9, 0.9]; 100],
+            sample_rate: 44_100,
+            loop_region: None,
+        };
+        let bank = SampleBank {
+            id: "multi".to_string(),
+            name: "Multi".to_string(),
+            release_ms: 50.0,
+            zones: vec![
+                SampleZone {
+                    min_note: 0,
+                    max_note: 127,
+                    root_note: 60,
+                    min_vel: 0,
+                    max_vel: 75,
+                    root_vel: 50,
+                    sample: soft_sample,
+                },
+                SampleZone {
+                    min_note: 0,
+                    max_note: 127,
+                    root_note: 60,
+                    min_vel: 76,
+                    max_vel: 127,
+                    root_vel: 110,
+                    sample: hard_sample,
+                },
+            ],
+        };
+
+        let mut pool = VoicePool::default();
+        let hard_params = SoundParams {
+            hammer_hardness: 1.0,
+            ..SoundParams::default()
+        };
+        pool.handle_event_with_params(
+            MidiEvent::NoteOn {
+                channel: 0,
+                note: 60,
+                velocity: 60,
+            },
+            &bank,
+            44_100,
+            hard_params,
+        );
+        assert_eq!(pool.voices[0].zone_idx, 1);
     }
 }
 

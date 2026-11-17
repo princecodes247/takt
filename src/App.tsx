@@ -44,6 +44,9 @@ interface SoundParamsDto {
   releaseMs: number;
   reverbMix: number;
   stereoWidth: number;
+  hammerHardness: number;
+  sampleOffsetMs: number;
+  velTrack: number;
 }
 
 const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
@@ -52,6 +55,9 @@ const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
   releaseMs: 85.0,
   reverbMix: 0.15,
   stereoWidth: 1.0,
+  hammerHardness: 0.5,
+  sampleOffsetMs: 0.0,
+  velTrack: 0.88,
 };
 
 interface InitialStateDto {
@@ -707,6 +713,28 @@ export default function App() {
         <div className="params-strip" aria-label="Voice Shaping">
           <div className="param-item">
             <div className="param-head">
+              <span>Hammer</span>
+              <span>
+                {Math.round((status?.soundParams.hammerHardness ?? 0.5) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(
+                (status?.soundParams.hammerHardness ?? 0.5) * 100
+              )}
+              onChange={(e) =>
+                handleSoundParamChange({
+                  hammerHardness: Number(e.target.value) / 100,
+                })
+              }
+            />
+          </div>
+
+          <div className="param-item">
+            <div className="param-head">
               <span>Tone</span>
               <span>
                 {Math.round((status?.soundParams.brightness ?? 1) * 100)}%
@@ -752,6 +780,46 @@ export default function App() {
               value={Math.round(status?.soundParams.releaseMs ?? 85)}
               onChange={(e) =>
                 handleSoundParamChange({ releaseMs: Number(e.target.value) })
+              }
+            />
+          </div>
+
+          <div className="param-item">
+            <div className="param-head">
+              <span>Offset</span>
+              <span>
+                {Math.round(status?.soundParams.sampleOffsetMs ?? 0)} ms
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={40}
+              value={Math.round(status?.soundParams.sampleOffsetMs ?? 0)}
+              onChange={(e) =>
+                handleSoundParamChange({
+                  sampleOffsetMs: Number(e.target.value),
+                })
+              }
+            />
+          </div>
+
+          <div className="param-item">
+            <div className="param-head">
+              <span>Veltrack</span>
+              <span>
+                {Math.round((status?.soundParams.velTrack ?? 0.88) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round((status?.soundParams.velTrack ?? 0.88) * 100)}
+              onChange={(e) =>
+                handleSoundParamChange({
+                  velTrack: Number(e.target.value) / 100,
+                })
               }
             />
           </div>
