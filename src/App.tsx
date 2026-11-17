@@ -14,6 +14,7 @@ interface AudioDeviceDto {
 interface SoundDto {
   id: string;
   name: string;
+  category: string;
 }
 
 interface StatusDto {
@@ -179,6 +180,8 @@ export default function App() {
   const [midiDevices, setMidiDevices] = useState<string[]>([]);
   const [audioDevices, setAudioDevices] = useState<AudioDeviceDto[]>([]);
   const [sounds, setSounds] = useState<SoundDto[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>("Model D");
+  const [soundSearch, setSoundSearch] = useState<string>("");
   const [status, setStatus] = useState<StatusDto | null>(null);
   const [loadingSoundId, setLoadingSoundId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -377,6 +380,35 @@ export default function App() {
       // ignore storage errors
     }
   }, [chordDetectEnabled]);
+
+  const soundCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of sounds) {
+      counts.set(s.category, (counts.get(s.category) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([name, count]) => ({
+      name,
+      count,
+    }));
+  }, [sounds]);
+
+  const filteredSounds = useMemo(() => {
+    const q = soundSearch.trim().toLowerCase();
+    if (q) {
+      return sounds.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          s.category.toLowerCase().includes(q)
+      );
+    }
+    if (selectedCategory === "All") return sounds;
+    return sounds.filter((s) => s.category === selectedCategory);
+  }, [sounds, selectedCategory, soundSearch]);
+
+  const activeSound = useMemo(
+    () => sounds.find((s) => s.id === status?.activeSoundId) ?? null,
+    [sounds, status?.activeSoundId]
+  );
 
   const detectedChord = useMemo(() => {
     if (!chordDetectEnabled) return null;
@@ -694,15 +726,64 @@ export default function App() {
 
       <section className="sound-section">
         <div className="sound-header">
-          <label>Sound</label>
-          {loadingSoundId && (
-            <span className="sound-loading-status" aria-live="polite">
-              Loading samples…
-            </span>
-          )}
+          <div className="sound-title-row">
+            <label>Voices</label>
+            {activeSound && (
+              <span className="active-sound-pill">
+                {activeSound.name} · {activeSound.category}
+              </span>
+            )}
+            {loadingSoundId && (
+              <span className="sound-loading-status" aria-live="polite">
+                Loading samples…
+              </span>
+            )}
+          </div>
+          <input
+            type="search"
+            className="voice-search"
+            placeholder={`Search ${sounds.length} voices…`}
+            value={soundSearch}
+            onChange={(e) => setSoundSearch(e.target.value)}
+            aria-label="Search voices"
+          />
         </div>
-        <div className="sound-grid" role="radiogroup" aria-label="Built-in Sounds">
-          {sounds.map((sound, idx) => {
+
+        <div className="category-tabs" role="tablist" aria-label="Voice Categories">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedCategory === "All" && !soundSearch}
+            className={`cat-tab ${selectedCategory === "All" && !soundSearch ? "active" : ""}`}
+            onClick={() => {
+              setSoundSearch("");
+              setSelectedCategory("All");
+            }}
+          >
+            All ({sounds.length})
+          </button>
+          {soundCategories.map((cat) => {
+            const active = selectedCategory === cat.name && !soundSearch;
+            return (
+              <button
+                key={cat.name}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={`cat-tab ${active ? "active" : ""}`}
+                onClick={() => {
+                  setSoundSearch("");
+                  setSelectedCategory(cat.name);
+                }}
+              >
+                {cat.name} ({cat.count})
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="sound-grid" role="radiogroup" aria-label="Voices">
+          {filteredSounds.map((sound, idx) => {
             const selected = status?.activeSoundId === sound.id;
             const isLoading = loadingSoundId === sound.id;
             return (
@@ -716,7 +797,11 @@ export default function App() {
                 onClick={() => handleSoundSelect(sound.id)}
               >
                 <span className="sound-pad-meta">
-                  {isLoading ? "LOADING…" : String(idx + 1).padStart(2, "0")}
+                  {isLoading
+                    ? "LOADING…"
+                    : soundSearch
+                      ? sound.category
+                      : String(idx + 1).padStart(2, "0")}
                 </span>
                 <span className="sound-pad-title">{sound.name}</span>
               </button>
