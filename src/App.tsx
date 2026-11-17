@@ -180,6 +180,7 @@ export default function App() {
   const [audioDevices, setAudioDevices] = useState<AudioDeviceDto[]>([]);
   const [sounds, setSounds] = useState<SoundDto[]>([]);
   const [status, setStatus] = useState<StatusDto | null>(null);
+  const [loadingSoundId, setLoadingSoundId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [keyboardEnabled, setKeyboardEnabled] = useState<boolean>(() => {
     try {
@@ -535,12 +536,16 @@ export default function App() {
   };
 
   const handleSoundSelect = async (soundId: string) => {
+    if (loadingSoundId !== null) return;
     setError(null);
+    setLoadingSoundId(soundId);
     try {
       const next = await invoke<StatusDto>("select_sound", { soundId });
       setStatus(next);
     } catch (err) {
       setError(String(err));
+    } finally {
+      setLoadingSoundId(null);
     }
   };
 
@@ -688,21 +693,30 @@ export default function App() {
       </section>
 
       <section className="sound-section">
-        <label>Sound</label>
+        <div className="sound-header">
+          <label>Sound</label>
+          {loadingSoundId && (
+            <span className="sound-loading-status" aria-live="polite">
+              Loading samples…
+            </span>
+          )}
+        </div>
         <div className="sound-grid" role="radiogroup" aria-label="Built-in Sounds">
           {sounds.map((sound, idx) => {
             const selected = status?.activeSoundId === sound.id;
+            const isLoading = loadingSoundId === sound.id;
             return (
               <button
                 key={sound.id}
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                className={`sound-pad ${selected ? "selected" : ""}`}
+                disabled={loadingSoundId !== null}
+                className={`sound-pad ${selected ? "selected" : ""} ${isLoading ? "loading" : ""}`}
                 onClick={() => handleSoundSelect(sound.id)}
               >
                 <span className="sound-pad-meta">
-                  {String(idx + 1).padStart(2, "0")}
+                  {isLoading ? "LOADING…" : String(idx + 1).padStart(2, "0")}
                 </span>
                 <span className="sound-pad-title">{sound.name}</span>
               </button>

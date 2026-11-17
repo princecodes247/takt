@@ -186,6 +186,19 @@ input:focus-visible {
   gap: 8px;
 }
 
+.sound-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sound-loading-status {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--accent);
+}
+
 .sound-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -214,6 +227,26 @@ input:focus-visible {
   border-color: var(--accent);
   background: rgba(245, 158, 11, 0.1);
   box-shadow: 0 0 0 1px var(--accent), 0 8px 20px var(--accent-glow);
+}
+
+.sound-pad.loading {
+  border-color: var(--accent);
+  background: rgba(245, 158, 11, 0.14);
+  animation: pad-pulse 900ms ease-in-out infinite;
+}
+
+.sound-pad:disabled {
+  cursor: wait;
+}
+
+@keyframes pad-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.65;
+  }
 }
 
 .sound-pad-title {
