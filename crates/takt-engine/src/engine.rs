@@ -7,7 +7,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use crate::audio::{open_output_stream, AudioStreamConfig, AudioStreamHandle};
 use crate::backing::{synthesize_demo_backing_track, BackingTrackPlayer, WorshipPadPlayer};
 use crate::midi::{open_midi_input, MidiEvent, MidiInputHandle};
-use crate::sampler::{decode_audio_bytes, load_built_in_banks, SampleBank, SampleData};
+use crate::sampler::{decode_audio_bytes, discover_banks, LazySampleBank, SampleBank, SampleData};
 use crate::voice::{AtomicSoundParams, SoundParams, VoicePool};
 use crate::EngineError;
 
@@ -49,7 +49,7 @@ pub struct EngineStatus {
 
 /// Coordinates MIDI input, sample bank loading, and the real-time audio stream.
 pub struct TaktEngine {
-    banks: Vec<Arc<SampleBank>>,
+    banks: Vec<LazySampleBank>,
     active_bank_idx: usize,
     audio_config: AudioStreamConfig,
     audio_handle: Option<AudioStreamHandle>,
@@ -80,12 +80,12 @@ pub struct TaktEngine {
 }
 
 impl TaktEngine {
-    /// Creates the engine, loads built-in sound banks into memory, and starts the default audio stream.
+    /// Creates the engine, discovers sound banks (loading only the active one), and starts the default audio stream.
     pub fn new(samples_dir: Option<&Path>) -> Result<Self, EngineError> {
-        let banks: Vec<Arc<SampleBank>> = load_built_in_banks(samples_dir)
-            .into_iter()
-            .map(Arc::new)
-            .collect();
+        let mut banks = discover_banks(samples_dir);
+        if let Some(first) = banks.get_mut(0) {
+            let _ = first.get_or_load();
+        }
 
         let (ctrl_tx, _ctrl_rx) = RingBuffer::new(CTRL_QUEUE_CAP);
         let (bank_tx, _bank_rx) = RingBuffer::new(BANK_QUEUE_CAP);
@@ -176,7 +176,7 @@ impl TaktEngine {
         Ok(())
     }
 
-    /// Switches the active built-in sound without allocating or dropping on the audio thread.
+    /// Switches the active sound bank (lazy-loading on first use) without allocating or dropping on the audio thread.
     pub fn select_sound(&mut self, sound_id: &str) -> Result<(), EngineError> {
         let idx = self
             .banks
@@ -185,7 +185,8 @@ impl TaktEngine {
             .ok_or_else(|| EngineError::SampleLoad(format!("unknown sound: {sound_id}")))?;
         self.active_bank_idx = idx;
         self.drain_reclaimed_banks();
-        let _ = self.bank_tx.push(Arc::clone(&self.banks[idx]));
+        let bank = self.banks[idx].get_or_load();
+        let _ = self.bank_tx.push(bank);
         Ok(())
     }
 
@@ -337,7 +338,7 @@ impl TaktEngine {
         self.track_tx = track_tx;
         self.reclaim_track_rx = reclaim_track_rx;
 
-        let mut active_bank = Arc::clone(&self.banks[self.active_bank_idx]);
+        let mut active_bank = self.banks[self.active_bank_idx].get_or_load();
         let mut pool = VoicePool::default();
         let mut backing_player = BackingTrackPlayer::new(
             self.current_track.clone(),

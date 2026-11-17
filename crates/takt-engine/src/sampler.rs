@@ -1,7 +1,8 @@
 use std::f32::consts::TAU;
 use std::fs::File;
 use std::io::Cursor;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
@@ -176,11 +177,35 @@ fn decode_media_stream(
     })
 }
 
-/// Returns the built-in sound banks (Model D Grand, Model D Warm, Electric Piano, Synth Pad).
-///
-/// If WAV files exist under `samples_dir/<id>/<note>.wav`, they are decoded via `symphonia`;
-/// otherwise, built-in synthesized multi-zone starter samples are generated in memory.
-pub fn load_built_in_banks(samples_dir: Option<&Path>) -> Vec<SampleBank> {
+/// Lazy-loadable descriptor for a built-in or user-provided sound bank.
+pub struct LazySampleBank {
+    pub id: String,
+    pub name: String,
+    pub release_ms: f32,
+    pub source_dir: Option<PathBuf>,
+    pub loaded: Option<Arc<SampleBank>>,
+}
+
+impl LazySampleBank {
+    /// Returns the loaded `SampleBank`, decoding or synthesizing it on first access.
+    pub fn get_or_load(&mut self) -> Arc<SampleBank> {
+        if let Some(bank) = &self.loaded {
+            return Arc::clone(bank);
+        }
+        let bank = if let Some(dir) = &self.source_dir {
+            try_load_dir_bank(&self.id, &self.name, self.release_ms, dir)
+                .unwrap_or_else(|| synthesize_starter_bank(&self.id, &self.name, self.release_ms))
+        } else {
+            synthesize_starter_bank(&self.id, &self.name, self.release_ms)
+        };
+        let arc = Arc::new(bank);
+        self.loaded = Some(Arc::clone(&arc));
+        arc
+    }
+}
+
+/// Discovers built-in and custom `assets/samples/<id>/` banks without decoding audio yet.
+pub fn discover_banks(samples_dir: Option<&Path>) -> Vec<LazySampleBank> {
     let specs = [
         ("model-d", "Model D Grand", 65.0_f32),
         ("model-d-warm", "Model D Warm", 85.0_f32),
@@ -188,23 +213,25 @@ pub fn load_built_in_banks(samples_dir: Option<&Path>) -> Vec<SampleBank> {
         ("pad", "Synth Pad", 180.0_f32),
     ];
 
-    let mut banks: Vec<SampleBank> = specs
+    let mut banks: Vec<LazySampleBank> = specs
         .into_iter()
         .map(|(id, name, release_ms)| {
-            if let Some(dir) = samples_dir {
-                let bank_dir = dir.join(id);
-                if let Some(bank) = try_load_dir_bank(id, name, release_ms, &bank_dir) {
-                    return bank;
-                }
+            let source_dir = samples_dir
+                .map(|dir| dir.join(id))
+                .filter(|p| has_sample_files(p));
+            LazySampleBank {
+                id: id.to_string(),
+                name: name.to_string(),
+                release_ms,
+                source_dir,
+                loaded: None,
             }
-            synthesize_starter_bank(id, name, release_ms)
         })
         .collect();
 
-    // Also discover any custom voice subdirectories under `samples_dir` (e.g. `model-d-concert`).
     if let Some(dir) = samples_dir {
         if let Ok(entries) = std::fs::read_dir(dir) {
-            let mut extra_dirs: Vec<(String, std::path::PathBuf)> = entries
+            let mut extra_dirs: Vec<(String, PathBuf)> = entries
                 .flatten()
                 .filter_map(|e| {
                     let path = e.path();
@@ -215,21 +242,55 @@ pub fn load_built_in_banks(samples_dir: Option<&Path>) -> Vec<SampleBank> {
                     if specs.iter().any(|(builtin_id, _, _)| *builtin_id == id) {
                         return None;
                     }
+                    if !has_sample_files(&path) {
+                        return None;
+                    }
                     Some((id, path))
                 })
                 .collect();
             extra_dirs.sort_by(|a, b| a.0.cmp(&b.0));
 
             for (id, path) in extra_dirs {
-                let display = format_voice_display_name(&id);
-                if let Some(bank) = try_load_dir_bank(&id, &display, 75.0, &path) {
-                    banks.push(bank);
-                }
+                banks.push(LazySampleBank {
+                    name: format_voice_display_name(&id),
+                    id,
+                    release_ms: 75.0,
+                    source_dir: Some(path),
+                    loaded: None,
+                });
             }
         }
     }
 
     banks
+}
+
+fn has_sample_files(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        let p = e.path();
+        p.is_file()
+            && p.file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(parse_sample_stem)
+                .is_some()
+    })
+}
+
+/// Returns the built-in sound banks (Model D Grand, Model D Warm, Electric Piano, Synth Pad).
+///
+/// If WAV files exist under `samples_dir/<id>/<note>.wav`, they are decoded via `symphonia`;
+/// otherwise, built-in synthesized multi-zone starter samples are generated in memory.
+pub fn load_built_in_banks(samples_dir: Option<&Path>) -> Vec<SampleBank> {
+    discover_banks(samples_dir)
+        .into_iter()
+        .map(|mut entry| {
+            let arc = entry.get_or_load();
+            Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone())
+        })
+        .collect()
 }
 
 fn format_voice_display_name(id: &str) -> String {
@@ -266,7 +327,7 @@ fn try_load_dir_bank(
     dir: &Path,
 ) -> Option<SampleBank> {
     let entries = std::fs::read_dir(dir).ok()?;
-    let mut loaded: Vec<(u8, u8, SampleData)> = Vec::new();
+    let mut paths: Vec<(u8, u8, PathBuf)> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -279,16 +340,51 @@ fn try_load_dir_bank(
         let Some((root_note, root_vel)) = parse_sample_stem(stem) else {
             continue;
         };
-        if let Ok(sample) = decode_audio_file(&path) {
-            loaded.push((root_note, root_vel, sample));
-        }
+        paths.push((root_note, root_vel, path));
     }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(paths.len())
+        .max(1);
+    let chunk_size = paths.len().div_ceil(workers);
+
+    let mut loaded: Vec<(u8, u8, SampleData)> = std::thread::scope(|s| {
+        let handles: Vec<_> = paths
+            .chunks(chunk_size)
+            .map(|chunk| {
+                s.spawn(move || {
+                    chunk
+                        .iter()
+                        .filter_map(|(note, vel, path)| {
+                            decode_audio_file(path)
+                                .ok()
+                                .map(|sample| (*note, *vel, sample))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+
+        let mut all = Vec::with_capacity(paths.len());
+        for h in handles {
+            if let Ok(part) = h.join() {
+                all.extend(part);
+            }
+        }
+        all
+    });
 
     if loaded.is_empty() {
         return None;
     }
 
-    let zones = build_zones_from_multi_roots(loaded);
+    let zones = build_zones_from_multi_roots(std::mem::take(&mut loaded));
     Some(SampleBank {
         id: id.to_string(),
         name: name.to_string(),

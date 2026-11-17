@@ -187,35 +187,44 @@ fn collect_audio_devices() -> Vec<AudioDeviceDto> {
         .collect()
 }
 
-fn call_engine<T>(tx: &Sender<EngineCmd>, make_cmd: impl FnOnce(Reply<T>) -> EngineCmd) -> Result<T, String> {
+async fn call_engine<T: Send + 'static>(
+    tx: &Sender<EngineCmd>,
+    make_cmd: impl FnOnce(Reply<T>) -> EngineCmd,
+) -> Result<T, String> {
     let (reply_tx, reply_rx) = mpsc::sync_channel(1);
     tx.send(make_cmd(reply_tx))
         .map_err(|_| "engine thread stopped".to_string())?;
-    reply_rx
-        .recv()
-        .map_err(|_| "engine thread dropped reply".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        reply_rx
+            .recv()
+            .map_err(|_| "engine thread dropped reply".to_string())?
+    })
+    .await
+    .map_err(|e| format!("engine task failed: {e}"))?
 }
 
 #[tauri::command]
-fn get_initial_state(state: State<'_, AppState>) -> Result<InitialStateDto, String> {
-    call_engine(&state.tx, EngineCmd::GetInitialState)
+async fn get_initial_state(state: State<'_, AppState>) -> Result<InitialStateDto, String> {
+    call_engine(&state.tx, EngineCmd::GetInitialState).await
 }
 
 #[tauri::command]
-fn refresh_audio_devices() -> Vec<AudioDeviceDto> {
-    collect_audio_devices()
+async fn refresh_audio_devices() -> Vec<AudioDeviceDto> {
+    tauri::async_runtime::spawn_blocking(collect_audio_devices)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-fn select_midi_device(
+async fn select_midi_device(
     state: State<'_, AppState>,
     device_name: Option<String>,
 ) -> Result<StatusDto, String> {
-    call_engine(&state.tx, |reply| EngineCmd::SelectMidi(device_name, reply))
+    call_engine(&state.tx, |reply| EngineCmd::SelectMidi(device_name, reply)).await
 }
 
 #[tauri::command]
-fn select_audio_device(
+async fn select_audio_device(
     state: State<'_, AppState>,
     device_name: Option<String>,
     buffer_size: Option<u32>,
@@ -223,11 +232,12 @@ fn select_audio_device(
     call_engine(&state.tx, |reply| {
         EngineCmd::SelectAudio(device_name, buffer_size, reply)
     })
+    .await
 }
 
 #[tauri::command]
-fn select_sound(state: State<'_, AppState>, sound_id: String) -> Result<StatusDto, String> {
-    call_engine(&state.tx, |reply| EngineCmd::SelectSound(sound_id, reply))
+async fn select_sound(state: State<'_, AppState>, sound_id: String) -> Result<StatusDto, String> {
+    call_engine(&state.tx, |reply| EngineCmd::SelectSound(sound_id, reply)).await
 }
 
 #[tauri::command]
@@ -239,8 +249,8 @@ fn set_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn panic_all_notes_off(state: State<'_, AppState>) -> Result<StatusDto, String> {
-    call_engine(&state.tx, EngineCmd::Panic)
+async fn panic_all_notes_off(state: State<'_, AppState>) -> Result<StatusDto, String> {
+    call_engine(&state.tx, EngineCmd::Panic).await
 }
 
 #[tauri::command]
@@ -258,7 +268,7 @@ fn trigger_test_note(
 }
 
 #[tauri::command]
-fn load_backing_track(
+async fn load_backing_track(
     state: State<'_, AppState>,
     request: tauri::ipc::Request<'_>,
 ) -> Result<StatusDto, String> {
@@ -282,23 +292,26 @@ fn load_backing_track(
     call_engine(&state.tx, |reply| {
         EngineCmd::LoadBackingTrack(name, bytes, ext, reply)
     })
+    .await
 }
 
 #[tauri::command]
-fn set_backing_track_playing(
+async fn set_backing_track_playing(
     state: State<'_, AppState>,
     playing: bool,
 ) -> Result<StatusDto, String> {
     call_engine(&state.tx, |reply| {
         EngineCmd::SetBackingTrackPlaying(playing, reply)
     })
+    .await
 }
 
 #[tauri::command]
-fn set_backing_track_loop(state: State<'_, AppState>, looping: bool) -> Result<StatusDto, String> {
+async fn set_backing_track_loop(state: State<'_, AppState>, looping: bool) -> Result<StatusDto, String> {
     call_engine(&state.tx, |reply| {
         EngineCmd::SetBackingTrackLoop(looping, reply)
     })
+    .await
 }
 
 #[tauri::command]
@@ -318,7 +331,7 @@ fn seek_backing_track(state: State<'_, AppState>, position_ms: u32) -> Result<()
 }
 
 #[tauri::command]
-fn set_worship_pad(
+async fn set_worship_pad(
     state: State<'_, AppState>,
     enabled: bool,
     key: i8,
@@ -326,6 +339,7 @@ fn set_worship_pad(
     call_engine(&state.tx, |reply| {
         EngineCmd::SetWorshipPad(enabled, key, reply)
     })
+    .await
 }
 
 #[tauri::command]
