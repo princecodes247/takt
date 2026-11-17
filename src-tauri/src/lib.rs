@@ -49,6 +49,7 @@ struct AudioDeviceDto {
 struct SoundDto {
     id: String,
     name: String,
+    category: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -402,6 +403,7 @@ pub fn run() {
                                 .map(|s| SoundDto {
                                     id: s.id,
                                     name: s.name,
+                                    category: s.category,
                                 })
                                 .collect();
                             let _ = reply.send(Ok(InitialStateDto {

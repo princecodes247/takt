@@ -181,6 +181,7 @@ fn decode_media_stream(
 pub struct LazySampleBank {
     pub id: String,
     pub name: String,
+    pub category: String,
     pub release_ms: f32,
     pub source_dir: Option<PathBuf>,
     pub loaded: Option<Arc<SampleBank>>,
@@ -207,21 +208,22 @@ impl LazySampleBank {
 /// Discovers built-in and custom `assets/samples/<id>/` banks without decoding audio yet.
 pub fn discover_banks(samples_dir: Option<&Path>) -> Vec<LazySampleBank> {
     let specs = [
-        ("model-d", "Model D Grand", 65.0_f32),
-        ("model-d-warm", "Model D Warm", 85.0_f32),
-        ("epiano", "Electric Piano", 55.0_f32),
-        ("pad", "Synth Pad", 180.0_f32),
+        ("model-d", "Model D Grand", "Model D", 65.0_f32),
+        ("model-d-warm", "Model D Warm", "Model D", 85.0_f32),
+        ("epiano", "Electric Piano", "Electric Pianos", 55.0_f32),
+        ("pad", "Synth Pad", "Synth & Pads", 180.0_f32),
     ];
 
     let mut banks: Vec<LazySampleBank> = specs
         .into_iter()
-        .map(|(id, name, release_ms)| {
+        .map(|(id, name, category, release_ms)| {
             let source_dir = samples_dir
                 .map(|dir| dir.join(id))
                 .filter(|p| has_sample_files(p));
             LazySampleBank {
                 id: id.to_string(),
                 name: name.to_string(),
+                category: category.to_string(),
                 release_ms,
                 source_dir,
                 loaded: None,
@@ -239,7 +241,7 @@ pub fn discover_banks(samples_dir: Option<&Path>) -> Vec<LazySampleBank> {
                         return None;
                     }
                     let id = path.file_name()?.to_str()?.to_string();
-                    if specs.iter().any(|(builtin_id, _, _)| *builtin_id == id) {
+                    if specs.iter().any(|(builtin_id, _, _, _)| *builtin_id == id) {
                         return None;
                     }
                     if !has_sample_files(&path) {
@@ -251,8 +253,12 @@ pub fn discover_banks(samples_dir: Option<&Path>) -> Vec<LazySampleBank> {
             extra_dirs.sort_by(|a, b| a.0.cmp(&b.0));
 
             for (id, path) in extra_dirs {
+                let (meta_name, meta_cat) = read_meta_txt(&path);
+                let name = meta_name.unwrap_or_else(|| format_voice_display_name(&id));
+                let category = meta_cat.unwrap_or_else(|| infer_voice_category(&id));
                 banks.push(LazySampleBank {
-                    name: format_voice_display_name(&id),
+                    name,
+                    category,
                     id,
                     release_ms: 75.0,
                     source_dir: Some(path),
@@ -263,6 +269,40 @@ pub fn discover_banks(samples_dir: Option<&Path>) -> Vec<LazySampleBank> {
     }
 
     banks
+}
+
+fn read_meta_txt(dir: &Path) -> (Option<String>, Option<String>) {
+    let Ok(text) = std::fs::read_to_string(dir.join("meta.txt")) else {
+        return (None, None);
+    };
+    let mut name = None;
+    let mut category = None;
+    for line in text.lines() {
+        if let Some(v) = line.strip_prefix("name=") {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                name = Some(trimmed.to_string());
+            }
+        } else if let Some(v) = line.strip_prefix("category=") {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                category = Some(trimmed.to_string());
+            }
+        }
+    }
+    (name, category)
+}
+
+fn infer_voice_category(id: &str) -> String {
+    if id.starts_with("md-") || id.starts_with("model-d") {
+        "Model D".to_string()
+    } else if id.contains("salamander") || id.contains("upright") {
+        "Acoustic Pianos".to_string()
+    } else if id.contains("fm-piano") || id.contains("epiano") || id.contains("stage-73") {
+        "Electric Pianos".to_string()
+    } else {
+        "Custom".to_string()
+    }
 }
 
 fn has_sample_files(dir: &Path) -> bool {
@@ -320,6 +360,25 @@ fn parse_sample_stem(stem: &str) -> Option<(u8, u8)> {
     Some((note, 100))
 }
 
+fn load_loop_map(dir: &Path) -> std::collections::HashMap<String, (usize, usize)> {
+    let mut map = std::collections::HashMap::new();
+    let Ok(text) = std::fs::read_to_string(dir.join("loops.txt")) else {
+        return map;
+    };
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let (Some(stem), Some(s), Some(e)) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+        if let (Ok(start), Ok(end)) = (s.parse::<usize>(), e.parse::<usize>()) {
+            if end > start {
+                map.insert(stem.to_string(), (start, end));
+            }
+        }
+    }
+    map
+}
+
 fn try_load_dir_bank(
     id: &str,
     name: &str,
@@ -327,7 +386,8 @@ fn try_load_dir_bank(
     dir: &Path,
 ) -> Option<SampleBank> {
     let entries = std::fs::read_dir(dir).ok()?;
-    let mut paths: Vec<(u8, u8, PathBuf)> = Vec::new();
+    let loop_map = load_loop_map(dir);
+    let mut paths: Vec<(u8, u8, PathBuf, Option<(usize, usize)>)> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -340,7 +400,8 @@ fn try_load_dir_bank(
         let Some((root_note, root_vel)) = parse_sample_stem(stem) else {
             continue;
         };
-        paths.push((root_note, root_vel, path));
+        let loop_reg = loop_map.get(stem).copied();
+        paths.push((root_note, root_vel, path, loop_reg));
     }
 
     if paths.is_empty() {
@@ -361,10 +422,15 @@ fn try_load_dir_bank(
                 s.spawn(move || {
                     chunk
                         .iter()
-                        .filter_map(|(note, vel, path)| {
-                            decode_audio_file(path)
-                                .ok()
-                                .map(|sample| (*note, *vel, sample))
+                        .filter_map(|(note, vel, path, loop_reg)| {
+                            decode_audio_file(path).ok().map(|mut sample| {
+                                if let Some((ls, le)) = *loop_reg {
+                                    if le <= sample.frames.len() && ls < le {
+                                        sample.loop_region = Some((ls, le));
+                                    }
+                                }
+                                (*note, *vel, sample)
+                            })
                         })
                         .collect::<Vec<_>>()
                 })

@@ -20,6 +20,7 @@ const BANK_QUEUE_CAP: usize = 16;
 pub struct SoundInfo {
     pub id: String,
     pub name: String,
+    pub category: String,
 }
 
 /// Live telemetry snapshot from the engine.
@@ -132,6 +133,7 @@ impl TaktEngine {
             .map(|b| SoundInfo {
                 id: b.id.clone(),
                 name: b.name.clone(),
+                category: b.category.clone(),
             })
             .collect()
     }
