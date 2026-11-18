@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "Takt",
-        "width": 1160,
-        "height": 700,
-        "minWidth": 900,
-        "minHeight": 580,
+        "width": 1180,
+        "height": 760,
+        "minWidth": 960,
+        "minHeight": 640,
         "resizable": true
       }
     ],

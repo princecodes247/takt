@@ -18,31 +18,6 @@ interface SoundDto {
   supportedParams: string[];
 }
 
-interface StatusDto {
-  audioDevice: string;
-  sampleRate: number;
-  bufferSize: number | null;
-  estimatedLatencyMs: number;
-  midiDevices: string[];
-  desiredMidiDevices: string[];
-  activeSoundId: string;
-  masterVolume: number;
-  isPlaying: boolLike;
-  activeVoices: number;
-  backingTrackName: string | null;
-  backingTrackPlaying: boolean;
-  backingTrackLoop: boolean;
-  backingTrackVolume: number;
-  backingTrackPositionMs: number;
-  backingTrackDurationMs: number;
-  worshipPadEnabled: boolean;
-  worshipPadKey: number;
-  worshipPadVolume: number;
-  soundParams: SoundParamsDto;
-}
-
-type boolLike = boolean;
-
 interface SoundParamsDto {
   brightness: number;
   attackMs: number;
@@ -58,6 +33,43 @@ interface SoundParamsDto {
   tremoloDepth: number;
   delayMix: number;
   voiceMode: "poly" | "mono" | "legato";
+}
+
+interface LayerDto {
+  soundId: string;
+  soundName: string;
+  category: string;
+  supportedParams: string[];
+  enabled: boolean;
+  volume: number;
+  minNote: number;
+  maxNote: number;
+  octaveShift: number;
+  params: SoundParamsDto;
+}
+
+interface StatusDto {
+  audioDevice: string;
+  sampleRate: number;
+  bufferSize: number | null;
+  estimatedLatencyMs: number;
+  midiDevices: string[];
+  desiredMidiDevices: string[];
+  activeSoundId: string;
+  masterVolume: number;
+  isPlaying: boolean;
+  activeVoices: number;
+  backingTrackName: string | null;
+  backingTrackPlaying: boolean;
+  backingTrackLoop: boolean;
+  backingTrackVolume: number;
+  backingTrackPositionMs: number;
+  backingTrackDurationMs: number;
+  worshipPadEnabled: boolean;
+  worshipPadKey: number;
+  worshipPadVolume: number;
+  soundParams: SoundParamsDto;
+  layers: LayerDto[];
 }
 
 const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
@@ -98,6 +110,23 @@ interface TelemetryDto {
 
 const WORSHIP_KEYS = [
   "C",
+  "Db",
+  "D",
+  "Eb",
+  "E",
+  "F",
+  "Gb",
+  "G",
+  "Ab",
+  "A",
+  "Bb",
+  "B",
+];
+
+const LAYER_COLORS = ["#f59e0b", "#22c55e", "#3b82f6", "#a855f7"];
+
+const NOTE_NAMES = [
+  "C",
   "C#",
   "D",
   "Eb",
@@ -110,6 +139,11 @@ const WORSHIP_KEYS = [
   "Bb",
   "B",
 ];
+
+function midiNoteLabel(note: number): string {
+  const oct = Math.floor(note / 12) - 1;
+  return `${NOTE_NAMES[note % 12]}${oct}`;
+}
 
 function formatTimeMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -286,11 +320,15 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<string>("Model D");
   const [soundSearch, setSoundSearch] = useState<string>("");
   const [status, setStatus] = useState<StatusDto | null>(null);
-  const [loadingSoundId, setLoadingSoundId] = useState<string | null>(null);
+  const [loadingTarget, setLoadingTarget] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupOpen, setSetupOpen] = useState<boolean>(false);
   const [showAllMidiPorts, setShowAllMidiPorts] = useState<boolean>(false);
-  const [browserOpen, setBrowserOpen] = useState<boolean>(true);
+  const [leftTab, setLeftTab] = useState<"pad" | "track">("pad");
+  // Voice picker modal: null = closed, number = replace layer index, "add" = add new layer
+  const [pickerTarget, setPickerTarget] = useState<number | "add" | null>(null);
+  // Layer DSP inspector modal: layer index or null
+  const [editingLayerIdx, setEditingLayerIdx] = useState<number | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
@@ -332,22 +370,97 @@ export default function App() {
   const activeMouseNoteRef = useRef<number | null>(null);
   const trackInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleSoundSelect = useCallback(
+  const layers = status?.layers ?? [];
+
+  const handleSelectFavorite = useCallback(
     async (soundId: string) => {
-      if (loadingSoundId !== null) return;
+      if (loadingTarget !== null) return;
       setError(null);
-      setLoadingSoundId(soundId);
+      setLoadingTarget(soundId);
       try {
-        const next = await invoke<StatusDto>("select_sound", { soundId });
+        const next = await invoke<StatusDto>("set_layer_sound", {
+          index: 0,
+          soundId,
+        });
         setStatus(next);
       } catch (err) {
         setError(String(err));
       } finally {
-        setLoadingSoundId(null);
+        setLoadingTarget(null);
       }
     },
-    [loadingSoundId]
+    [loadingTarget]
   );
+
+  const handleAssignSound = useCallback(
+    async (target: number | "add", soundId: string) => {
+      if (loadingTarget !== null) return;
+      setError(null);
+      setLoadingTarget(soundId);
+      try {
+        const next =
+          target === "add"
+            ? await invoke<StatusDto>("add_layer", { soundId })
+            : await invoke<StatusDto>("set_layer_sound", {
+                index: target,
+                soundId,
+              });
+        setStatus(next);
+        setPickerTarget(null);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setLoadingTarget(null);
+      }
+    },
+    [loadingTarget]
+  );
+
+  const handleRemoveLayer = async (index: number) => {
+    setError(null);
+    try {
+      const next = await invoke<StatusDto>("remove_layer", { index });
+      setStatus(next);
+      if (editingLayerIdx === index) setEditingLayerIdx(null);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleUpdateLayer = async (
+    index: number,
+    patch: Partial<LayerDto> & { paramsPatch?: Partial<SoundParamsDto> }
+  ) => {
+    const layer = status?.layers[index];
+    if (!layer) return;
+    const nextLayer: LayerDto = {
+      ...layer,
+      ...patch,
+      params: patch.paramsPatch
+        ? { ...layer.params, ...patch.paramsPatch }
+        : patch.params ?? layer.params,
+    };
+    setStatus((prev) => {
+      if (!prev) return prev;
+      const nextLayers = prev.layers.map((l, i) =>
+        i === index ? nextLayer : l
+      );
+      return { ...prev, layers: nextLayers };
+    });
+    try {
+      await invoke("update_layer", {
+        index,
+        enabled: nextLayer.enabled,
+        volume: nextLayer.volume,
+        minNote: nextLayer.minNote,
+        maxNote: nextLayer.maxNote,
+        octaveShift: nextLayer.octaveShift,
+        params: nextLayer.params,
+      });
+    } catch (err) {
+      setError(String(err));
+    }
+  };
 
   useEffect(() => {
     try {
@@ -424,13 +537,13 @@ export default function App() {
     const unlistenPc = listen<number>("takt://program-change", (event) => {
       const target = favoriteSounds[event.payload];
       if (target) {
-        handleSoundSelect(target.id);
+        handleSelectFavorite(target.id);
       }
     });
     return () => {
       unlistenPc.then((fn) => fn());
     };
-  }, [favoriteSounds, handleSoundSelect]);
+  }, [favoriteSounds, handleSelectFavorite]);
 
   const releaseAllKeyboardNotes = useCallback(() => {
     if (activeKeyNotesRef.current.size === 0) return;
@@ -586,16 +699,6 @@ export default function App() {
     return sounds.filter((s) => s.category === selectedCategory);
   }, [sounds, selectedCategory, soundSearch]);
 
-  const activeSound = useMemo(
-    () => sounds.find((s) => s.id === status?.activeSoundId) ?? null,
-    [sounds, status?.activeSoundId]
-  );
-
-  const supportedParams = useMemo(
-    () => new Set(activeSound?.supportedParams ?? []),
-    [activeSound]
-  );
-
   const groupedMidi = useMemo(() => groupMidiDevices(midiDevices), [midiDevices]);
 
   const detectedChord = useMemo(() => {
@@ -711,17 +814,6 @@ export default function App() {
     }
   };
 
-  const handleSoundParamChange = async (patch: Partial<SoundParamsDto>) => {
-    const current = status?.soundParams ?? DEFAULT_SOUND_PARAMS;
-    const nextParams: SoundParamsDto = { ...current, ...patch };
-    setStatus((prev) => (prev ? { ...prev, soundParams: nextParams } : prev));
-    try {
-      await invoke("set_sound_params", { params: nextParams });
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
   const currentAudioDevice = audioDevices.find(
     (d) => d.name === status?.audioDevice
   );
@@ -794,42 +886,22 @@ export default function App() {
   };
 
   const volumePct = Math.round((status?.masterVolume ?? 0.8) * 100);
-  const params = status?.soundParams ?? DEFAULT_SOUND_PARAMS;
-
-  const hasToneGroup =
-    supportedParams.has("hammer") ||
-    supportedParams.has("brightness") ||
-    supportedParams.has("veltrack") ||
-    supportedParams.has("resonance");
-  const hasEffectsGroup =
-    supportedParams.has("chorus") ||
-    supportedParams.has("tremolo") ||
-    supportedParams.has("delay") ||
-    supportedParams.has("reverb") ||
-    supportedParams.has("width");
-  const hasEnvelopeGroup =
-    supportedParams.has("attack") ||
-    supportedParams.has("release") ||
-    supportedParams.has("offset") ||
-    supportedParams.has("glide");
-
   const trackDuration = Math.max(1, status?.backingTrackDurationMs ?? 0);
   const trackPos = status?.backingTrackPositionMs ?? 0;
   const trackSeekPct = (trackPos / trackDuration) * 100;
   const trackVolPct = Math.round((status?.backingTrackVolume ?? 0.75) * 100);
   const padVolPct = Math.round((status?.worshipPadVolume ?? 0.55) * 100);
 
+  const editingLayer =
+    editingLayerIdx !== null ? layers[editingLayerIdx] ?? null : null;
+  const editingParamsSet = new Set(editingLayer?.supportedParams ?? []);
+
   return (
     <main className="rack">
+      {/* Top Bar */}
       <header className="rack-header">
         <div className="brand">
           <h1 className="brand-name">Takt</h1>
-          <span className="brand-tag">
-            {activeSound ? activeSound.name : "Live Instrument Host"}
-          </span>
-        </div>
-
-        <div className="header-right">
           <div className="telemetry-strip" aria-live="polite">
             <div className="activity-indicator">
               <span
@@ -845,9 +917,37 @@ export default function App() {
             <div className="latency-readout">
               {status ? `${status.estimatedLatencyMs.toFixed(1)} ms` : "-- ms"}
             </div>
-            <div className="midi-badge" title="Active MIDI Inputs">
-              MIDI: {status?.midiDevices.length ?? 0}
+            <div className="midi-badge">
+              MIDI {status?.midiDevices.length ?? 0}
             </div>
+          </div>
+        </div>
+
+        <div className="header-right">
+          <button
+            type="button"
+            className="btn btn-panic btn-sm"
+            onClick={handlePanic}
+          >
+            Panic
+          </button>
+
+          <div className="header-master" title="Double-click to reset (80%)">
+            <span className="master-label">Master</span>
+            <input
+              type="range"
+              className="filled-slider master-slider"
+              style={
+                { "--fill": `${(volumePct / 125) * 100}%` } as React.CSSProperties
+              }
+              aria-label="Master Volume"
+              min={0}
+              max={125}
+              value={volumePct}
+              onChange={(e) => handleVolumeChange(Number(e.target.value))}
+              onDoubleClick={() => handleVolumeChange(80)}
+            />
+            <span className="master-pct">{volumePct}%</span>
           </div>
 
           <button
@@ -868,192 +968,182 @@ export default function App() {
         </div>
       )}
 
-      <div className="rack-body">
-        {setupOpen ? (
-          <section className="setup-panel" aria-label="Hardware & Audio Setup">
-            <div className="setup-section">
-              <div className="field-row">
-                <label>MIDI Inputs</label>
-                <div className="setup-midi-actions">
-                  <span className="midi-count">
-                    {status?.midiDevices.length ?? 0} active
-                  </span>
-                  <label className="checkbox-inline">
-                    <input
-                      type="checkbox"
-                      checked={showAllMidiPorts}
-                      onChange={(e) => setShowAllMidiPorts(e.target.checked)}
-                    />
-                    <span>Show all ports</span>
-                  </label>
-                </div>
+      {setupOpen ? (
+        <section className="setup-panel" aria-label="Hardware & Audio Setup">
+          <div className="setup-section">
+            <div className="field-row">
+              <label>MIDI Inputs</label>
+              <div className="setup-midi-actions">
+                <span className="midi-count">
+                  {status?.midiDevices.length ?? 0} active
+                </span>
+                <label className="checkbox-inline">
+                  <input
+                    type="checkbox"
+                    checked={showAllMidiPorts}
+                    onChange={(e) => setShowAllMidiPorts(e.target.checked)}
+                  />
+                  <span>Show all ports</span>
+                </label>
               </div>
+            </div>
 
-              <div className="midi-groups">
-                {groupedMidi.length === 0 &&
-                (status?.desiredMidiDevices.length ?? 0) === 0 ? (
-                  <span className="midi-empty">No MIDI devices connected</span>
-                ) : (
-                  <>
-                    {groupedMidi.map((group) => {
-                      const primaryPort =
-                        group.ports.find((p) => !p.isSecondary) ??
-                        group.ports[0];
-                      const visiblePorts = showAllMidiPorts
-                        ? group.ports
-                        : group.ports.filter(
-                            (p) =>
-                              p.name === primaryPort.name ||
-                              (status?.desiredMidiDevices.includes(p.name) ??
-                                false)
-                          );
-                      return (
-                        <div key={group.deviceName} className="midi-group-row">
-                          <span className="midi-group-name">
-                            {group.deviceName}
-                          </span>
-                          <div className="midi-group-ports">
-                            {visiblePorts.map((port) => {
-                              const enabled =
-                                status?.desiredMidiDevices.includes(
-                                  port.name
-                                ) ?? false;
-                              const connected =
-                                status?.midiDevices.includes(port.name) ??
-                                false;
-                              return (
-                                <button
-                                  key={port.name}
-                                  type="button"
-                                  className={`midi-chip ${connected ? "connected" : enabled ? "enabled" : ""}`}
-                                  onClick={() =>
-                                    handleToggleMidiDevice(port.name)
-                                  }
-                                >
-                                  <span
-                                    className="midi-chip-dot"
-                                    aria-hidden="true"
-                                  />
-                                  <span>{port.name}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
+            <div className="midi-groups">
+              {groupedMidi.length === 0 &&
+              (status?.desiredMidiDevices.length ?? 0) === 0 ? (
+                <span className="midi-empty">No MIDI devices connected</span>
+              ) : (
+                <>
+                  {groupedMidi.map((group) => {
+                    const primaryPort =
+                      group.ports.find((p) => !p.isSecondary) ?? group.ports[0];
+                    const visiblePorts = showAllMidiPorts
+                      ? group.ports
+                      : group.ports.filter(
+                          (p) =>
+                            p.name === primaryPort.name ||
+                            (status?.desiredMidiDevices.includes(p.name) ??
+                              false)
+                        );
+                    return (
+                      <div key={group.deviceName} className="midi-group-row">
+                        <span className="midi-group-name">
+                          {group.deviceName}
+                        </span>
+                        <div className="midi-group-ports">
+                          {visiblePorts.map((port) => {
+                            const enabled =
+                              status?.desiredMidiDevices.includes(port.name) ??
+                              false;
+                            const connected =
+                              status?.midiDevices.includes(port.name) ?? false;
+                            return (
+                              <button
+                                key={port.name}
+                                type="button"
+                                className={`midi-chip ${connected ? "connected" : enabled ? "enabled" : ""}`}
+                                onClick={() => handleToggleMidiDevice(port.name)}
+                              >
+                                <span
+                                  className="midi-chip-dot"
+                                  aria-hidden="true"
+                                />
+                                <span>{port.name}</span>
+                              </button>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                    {(status?.desiredMidiDevices ?? [])
-                      .filter((name) => !midiDevices.includes(name))
-                      .map((name) => (
-                        <button
-                          key={`offline-${name}`}
-                          type="button"
-                          className="midi-chip offline"
-                          onClick={() => handleToggleMidiDevice(name)}
-                          title="Remembered device is offline (will auto-reconnect when plugged in). Click to forget."
-                        >
-                          <span className="midi-chip-dot" aria-hidden="true" />
-                          <span>{name} (Offline) ×</span>
-                        </button>
-                      ))}
-                  </>
-                )}
+                      </div>
+                    );
+                  })}
+                  {(status?.desiredMidiDevices ?? [])
+                    .filter((name) => !midiDevices.includes(name))
+                    .map((name) => (
+                      <button
+                        key={`offline-${name}`}
+                        type="button"
+                        className="midi-chip offline"
+                        onClick={() => handleToggleMidiDevice(name)}
+                        title="Remembered device is offline (will auto-reconnect when plugged in). Click to forget."
+                      >
+                        <span className="midi-chip-dot" aria-hidden="true" />
+                        <span>{name} (Offline) ×</span>
+                      </button>
+                    ))}
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="audio-select">Audio Output</label>
+              <select
+                id="audio-select"
+                value={status?.audioDevice ?? ""}
+                onChange={(e) =>
+                  handleAudioChange(e.target.value, status?.bufferSize ?? null)
+                }
+              >
+                {audioDevices.map((dev) => (
+                  <option key={dev.name} value={dev.name}>
+                    {dev.name} {dev.isDefault ? "(Default)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label htmlFor="buffer-select">Buffer Size</label>
+              <select
+                id="buffer-select"
+                value={status?.bufferSize ?? ""}
+                onChange={(e) => {
+                  const val =
+                    e.target.value === "" ? null : Number(e.target.value);
+                  handleAudioChange(status?.audioDevice ?? "", val);
+                }}
+              >
+                <option value="">System Default</option>
+                {bufferChoices.map((frames) => (
+                  <option key={frames} value={frames}>
+                    {frames} samples
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid-2">
+            <div className="field">
+              <label>Stream Format</label>
+              <div className="info-box">
+                {status
+                  ? `${status.sampleRate} Hz · ${layers.length} active layer${layers.length === 1 ? "" : "s"}`
+                  : "Loading…"}
               </div>
             </div>
 
-            <div className="grid-2">
-              <div className="field">
-                <label htmlFor="audio-select">Audio Output</label>
-                <select
-                  id="audio-select"
-                  value={status?.audioDevice ?? ""}
-                  onChange={(e) =>
-                    handleAudioChange(
-                      e.target.value,
-                      status?.bufferSize ?? null
-                    )
-                  }
-                >
-                  {audioDevices.map((dev) => (
-                    <option key={dev.name} value={dev.name}>
-                      {dev.name} {dev.isDefault ? "(Default)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor="buffer-select">Buffer Size</label>
-                <select
-                  id="buffer-select"
-                  value={status?.bufferSize ?? ""}
-                  onChange={(e) => {
-                    const val =
-                      e.target.value === "" ? null : Number(e.target.value);
-                    handleAudioChange(status?.audioDevice ?? "", val);
-                  }}
-                >
-                  <option value="">System Default</option>
-                  {bufferChoices.map((frames) => (
-                    <option key={frames} value={frames}>
-                      {frames} samples
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="field">
+              <label>Audio Check</label>
+              <button
+                type="button"
+                className="btn"
+                onMouseDown={() => triggerAudition(true)}
+                onMouseUp={() => triggerAudition(false)}
+                onMouseLeave={() => triggerAudition(false)}
+              >
+                Test C4 Note
+              </button>
             </div>
-
-            <div className="grid-2">
-              <div className="field">
-                <label>Stream Format</label>
-                <div className="info-box">
-                  {status
-                    ? `${status.sampleRate} Hz · ${
-                        params.voiceMode === "mono"
-                          ? "Monophonic"
-                          : params.voiceMode === "legato"
-                            ? "Mono Legato"
-                            : "32-voice poly"
-                      }`
-                    : "Loading…"}
-                </div>
-              </div>
-
-              <div className="field">
-                <label>Audio Check</label>
+          </div>
+        </section>
+      ) : (
+        <div className="stage-layout">
+          {/* Left Sidebar: Setlist Favorites + Tonic Pad / Backing Track */}
+          <aside className="stage-sidebar">
+            <section className="sidebar-card favorites-card">
+              <div className="sidebar-card-head">
+                <label>Favorites</label>
                 <button
                   type="button"
-                  className="btn"
-                  onMouseDown={() => triggerAudition(true)}
-                  onMouseUp={() => triggerAudition(false)}
-                  onMouseLeave={() => triggerAudition(false)}
+                  className="btn-mini"
+                  onClick={() => setPickerTarget(0)}
                 >
-                  Test C4 Note
+                  Browse ({sounds.length})
                 </button>
               </div>
-            </div>
-          </section>
-        ) : (
-          <>
-            {/* Stage Favorites Bar */}
-            <section className="favorites-section" aria-label="Stage Favorites">
-              <div className="favorites-header">
-                <label>Stage Favorites</label>
-                <span className="favorites-hint">
-                  MIDI Program Change 1–8 or click · ★ in browser to pin
-                </span>
-              </div>
-              <div className="favorites-grid">
+              <div className="favorites-list">
                 {favoriteSounds.map((fav, idx) => {
-                  const selected = status?.activeSoundId === fav.id;
-                  const isLoading = loadingSoundId === fav.id;
+                  const selected = layers[0]?.soundId === fav.id;
+                  const isLoading = loadingTarget === fav.id;
                   return (
                     <button
                       key={fav.id}
                       type="button"
-                      disabled={loadingSoundId !== null}
-                      className={`fav-btn ${selected ? "selected" : ""} ${isLoading ? "loading" : ""}`}
-                      onClick={() => handleSoundSelect(fav.id)}
+                      disabled={loadingTarget !== null}
+                      className={`fav-row ${selected ? "selected" : ""} ${isLoading ? "loading" : ""}`}
+                      onClick={() => handleSelectFavorite(fav.id)}
                     >
                       <span className="fav-num">0{idx + 1}</span>
                       <span className="fav-name">{fav.name}</span>
@@ -1063,434 +1153,98 @@ export default function App() {
               </div>
             </section>
 
-            {/* Voice Browser */}
-            <section className="sound-section">
-              <div className="sound-header">
-                <div className="sound-title-row">
-                  <button
-                    type="button"
-                    className="btn-mini"
-                    onClick={() => setBrowserOpen((v) => !v)}
-                  >
-                    {browserOpen ? "▾ Voices" : "▸ Voices"} ({sounds.length})
-                  </button>
-                  {activeSound && (
-                    <span className="active-sound-pill">
-                      {activeSound.name} · {activeSound.category}
-                    </span>
-                  )}
-                  {loadingSoundId && (
-                    <span className="sound-loading-status" aria-live="polite">
-                      Loading samples…
-                    </span>
-                  )}
-                </div>
-                {browserOpen && (
-                  <input
-                    type="search"
-                    className="voice-search"
-                    placeholder={`Search ${sounds.length} voices…`}
-                    value={soundSearch}
-                    onChange={(e) => setSoundSearch(e.target.value)}
-                    aria-label="Search voices"
-                  />
-                )}
-              </div>
-
-              {browserOpen && (
-                <>
-                  <div
-                    className="category-tabs"
-                    role="tablist"
-                    aria-label="Voice Categories"
-                  >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={selectedCategory === "All" && !soundSearch}
-                      className={`cat-tab ${selectedCategory === "All" && !soundSearch ? "active" : ""}`}
-                      onClick={() => {
-                        setSoundSearch("");
-                        setSelectedCategory("All");
-                      }}
-                    >
-                      All ({sounds.length})
-                    </button>
-                    {soundCategories.map((cat) => {
-                      const active =
-                        selectedCategory === cat.name && !soundSearch;
-                      return (
-                        <button
-                          key={cat.name}
-                          type="button"
-                          role="tab"
-                          aria-selected={active}
-                          className={`cat-tab ${active ? "active" : ""}`}
-                          onClick={() => {
-                            setSoundSearch("");
-                            setSelectedCategory(cat.name);
-                          }}
-                        >
-                          {cat.name} ({cat.count})
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="sound-grid" role="radiogroup" aria-label="Voices">
-                    {filteredSounds.map((sound, idx) => {
-                      const selected = status?.activeSoundId === sound.id;
-                      const isLoading = loadingSoundId === sound.id;
-                      const isFav = favoriteSet.has(sound.id);
-                      return (
-                        <div
-                          key={sound.id}
-                          className={`sound-pad-wrap ${selected ? "selected" : ""} ${isLoading ? "loading" : ""}`}
-                        >
-                          <button
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            disabled={loadingSoundId !== null}
-                            className="sound-pad-btn"
-                            onClick={() => handleSoundSelect(sound.id)}
-                          >
-                            <span className="sound-pad-meta">
-                              {isLoading
-                                ? "LOADING…"
-                                : soundSearch
-                                  ? sound.category
-                                  : String(idx + 1).padStart(2, "0")}
-                            </span>
-                            <span className="sound-pad-title">{sound.name}</span>
-                          </button>
-                          <button
-                            type="button"
-                            className={`star-btn ${isFav ? "starred" : ""}`}
-                            onClick={() => toggleFavorite(sound.id)}
-                            title={
-                              isFav
-                                ? "Remove from Stage Favorites"
-                                : "Pin to Stage Favorites"
-                            }
-                            aria-label={`Favorite ${sound.name}`}
-                          >
-                            {isFav ? "★" : "☆"}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </section>
-
-            {/* Grouped Performance Controls */}
-            <section className="controls-groups" aria-label="Voice Shaping">
-              <div className="control-group mode-group">
-                <div className="group-title">Mode</div>
-                <div className="mode-pills" role="group" aria-label="Voice Mode">
-                  {(["poly", "mono", "legato"] as const).map((mode) => {
-                    const active = params.voiceMode === mode;
-                    return (
-                      <button
-                        key={mode}
-                        type="button"
-                        className={`mode-pill ${active ? "active" : ""}`}
-                        onClick={() =>
-                          handleSoundParamChange({ voiceMode: mode })
-                        }
-                      >
-                        {mode === "poly"
-                          ? "Poly"
-                          : mode === "mono"
-                            ? "Mono"
-                            : "Legato"}
-                      </button>
-                    );
-                  })}
-                </div>
+            <section className="sidebar-card pad-track-card">
+              <div className="sub-tabs" role="tablist">
                 <button
                   type="button"
-                  className="btn-mini reset-all-btn"
-                  onClick={() => handleSoundParamChange(DEFAULT_SOUND_PARAMS)}
+                  role="tab"
+                  aria-selected={leftTab === "pad"}
+                  className={`sub-tab ${leftTab === "pad" ? "active" : ""}`}
+                  onClick={() => setLeftTab("pad")}
                 >
-                  Reset Controls
+                  <span
+                    className={`mini-dot ${status?.worshipPadEnabled ? "on" : ""}`}
+                  />
+                  Worship Pad
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={leftTab === "track"}
+                  className={`sub-tab ${leftTab === "track" ? "active" : ""}`}
+                  onClick={() => setLeftTab("track")}
+                >
+                  <span
+                    className={`mini-dot ${status?.backingTrackPlaying ? "on" : ""}`}
+                  />
+                  Backing Track
                 </button>
               </div>
 
-              {hasToneGroup && (
-                <div className="control-group">
-                  <div className="group-title">Tone</div>
-                  <div className="group-sliders">
-                    {supportedParams.has("hammer") && (
-                      <ParamSlider
-                        label="Hammer"
-                        displayValue={`${Math.round(params.hammerHardness * 100)}%`}
-                        value={Math.round(params.hammerHardness * 100)}
-                        min={0}
-                        max={100}
-                        onChange={(v) =>
-                          handleSoundParamChange({ hammerHardness: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            hammerHardness: DEFAULT_SOUND_PARAMS.hammerHardness,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("brightness") && (
-                      <ParamSlider
-                        label="Tone"
-                        displayValue={`${Math.round(params.brightness * 100)}%`}
-                        value={Math.round(params.brightness * 100)}
-                        min={0}
-                        max={100}
-                        onChange={(v) =>
-                          handleSoundParamChange({ brightness: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            brightness: DEFAULT_SOUND_PARAMS.brightness,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("resonance") && (
-                      <ParamSlider
-                        label="Resonance"
-                        displayValue={`${Math.round(params.resonance * 100)}%`}
-                        value={Math.round(params.resonance * 100)}
-                        min={0}
-                        max={85}
-                        onChange={(v) =>
-                          handleSoundParamChange({ resonance: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            resonance: DEFAULT_SOUND_PARAMS.resonance,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("veltrack") && (
-                      <ParamSlider
-                        label="Veltrack"
-                        displayValue={`${Math.round(params.velTrack * 100)}%`}
-                        value={Math.round(params.velTrack * 100)}
-                        min={0}
-                        max={100}
-                        onChange={(v) =>
-                          handleSoundParamChange({ velTrack: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            velTrack: DEFAULT_SOUND_PARAMS.velTrack,
-                          })
-                        }
-                      />
-                    )}
+              {leftTab === "pad" ? (
+                <div className="pad-module">
+                  <div className="pad-top-row">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={status?.worshipPadEnabled ?? false}
+                      className={`toggle-pill ${status?.worshipPadEnabled ? "on" : ""}`}
+                      onClick={handleWorshipPadToggle}
+                    >
+                      <span className="toggle-dot" aria-hidden="true" />
+                      <span>{status?.worshipPadEnabled ? "PAD ON" : "PAD OFF"}</span>
+                    </button>
+                    <span className="vol-readout">{padVolPct}%</span>
                   </div>
-                </div>
-              )}
 
-              {hasEffectsGroup && (
-                <div className="control-group">
-                  <div className="group-title">Effects</div>
-                  <div className="group-sliders">
-                    {supportedParams.has("chorus") && (
-                      <ParamSlider
-                        label="Chorus"
-                        displayValue={`${Math.round(params.chorusMix * 100)}%`}
-                        value={Math.round(params.chorusMix * 100)}
-                        min={0}
-                        max={100}
-                        onChange={(v) =>
-                          handleSoundParamChange({ chorusMix: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            chorusMix: DEFAULT_SOUND_PARAMS.chorusMix,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("tremolo") && (
-                      <ParamSlider
-                        label="Tremolo"
-                        displayValue={`${Math.round(params.tremoloDepth * 100)}%`}
-                        value={Math.round(params.tremoloDepth * 100)}
-                        min={0}
-                        max={100}
-                        onChange={(v) =>
-                          handleSoundParamChange({ tremoloDepth: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            tremoloDepth: DEFAULT_SOUND_PARAMS.tremoloDepth,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("delay") && (
-                      <ParamSlider
-                        label="Delay"
-                        displayValue={`${Math.round(params.delayMix * 100)}%`}
-                        value={Math.round(params.delayMix * 100)}
-                        min={0}
-                        max={60}
-                        onChange={(v) =>
-                          handleSoundParamChange({ delayMix: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            delayMix: DEFAULT_SOUND_PARAMS.delayMix,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("reverb") && (
-                      <ParamSlider
-                        label="Reverb"
-                        displayValue={`${Math.round(params.reverbMix * 100)}%`}
-                        value={Math.round(params.reverbMix * 100)}
-                        min={0}
-                        max={70}
-                        onChange={(v) =>
-                          handleSoundParamChange({ reverbMix: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            reverbMix: DEFAULT_SOUND_PARAMS.reverbMix,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("width") && (
-                      <ParamSlider
-                        label="Width"
-                        displayValue={`${Math.round(params.stereoWidth * 100)}%`}
-                        value={Math.round(params.stereoWidth * 100)}
-                        min={0}
-                        max={150}
-                        onChange={(v) =>
-                          handleSoundParamChange({ stereoWidth: v / 100 })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            stereoWidth: DEFAULT_SOUND_PARAMS.stereoWidth,
-                          })
-                        }
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {hasEnvelopeGroup && (
-                <div className="control-group">
-                  <div className="group-title">Envelope</div>
-                  <div className="group-sliders">
-                    {supportedParams.has("glide") && (
-                      <ParamSlider
-                        label="Glide"
-                        displayValue={`${Math.round(params.glideMs)} ms`}
-                        value={Math.round(params.glideMs)}
-                        min={0}
-                        max={400}
-                        step={5}
-                        onChange={(v) => handleSoundParamChange({ glideMs: v })}
-                        onReset={() =>
-                          handleSoundParamChange({
-                            glideMs: DEFAULT_SOUND_PARAMS.glideMs,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("attack") && (
-                      <ParamSlider
-                        label="Attack"
-                        displayValue={`${Math.round(params.attackMs)} ms`}
-                        value={Math.round(params.attackMs)}
-                        min={0}
-                        max={300}
-                        onChange={(v) =>
-                          handleSoundParamChange({ attackMs: v })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            attackMs: DEFAULT_SOUND_PARAMS.attackMs,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("release") && (
-                      <ParamSlider
-                        label="Release"
-                        displayValue={`${Math.round(params.releaseMs)} ms`}
-                        value={Math.round(params.releaseMs)}
-                        min={20}
-                        max={1200}
-                        step={5}
-                        onChange={(v) =>
-                          handleSoundParamChange({ releaseMs: v })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            releaseMs: DEFAULT_SOUND_PARAMS.releaseMs,
-                          })
-                        }
-                      />
-                    )}
-                    {supportedParams.has("offset") && (
-                      <ParamSlider
-                        label="Offset"
-                        displayValue={`${Math.round(params.sampleOffsetMs)} ms`}
-                        value={Math.round(params.sampleOffsetMs)}
-                        min={0}
-                        max={40}
-                        onChange={(v) =>
-                          handleSoundParamChange({ sampleOffsetMs: v })
-                        }
-                        onReset={() =>
-                          handleSoundParamChange({
-                            sampleOffsetMs: DEFAULT_SOUND_PARAMS.sampleOffsetMs,
-                          })
-                        }
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-
-            {/* Backing Track & Worship Pad */}
-            <section className="grid-2">
-              <div className="module-card">
-                <div className="module-header">
-                  <label>Backing Track</label>
-                  <div className="module-actions">
-                    <div className="mini-vol">
-                      <span>Vol</span>
+                  <div className="pad-body">
+                    <div
+                      className="pad-key-grid-4x3"
+                      role="group"
+                      aria-label="Worship Pad Key"
+                    >
+                      {WORSHIP_KEYS.map((label, idx) => {
+                        const active =
+                          status?.worshipPadEnabled &&
+                          status?.worshipPadKey === idx;
+                        const selected = status?.worshipPadKey === idx;
+                        return (
+                          <button
+                            key={label}
+                            type="button"
+                            className={`pad-key-btn ${active ? "active" : selected ? "selected" : ""}`}
+                            onClick={() => handleWorshipPadKey(idx)}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="v-fader-wrap">
                       <input
                         type="range"
-                        className="filled-slider"
+                        className="v-fader"
                         style={
                           {
-                            "--fill": `${(trackVolPct / 125) * 100}%`,
+                            "--fill": `${(padVolPct / 125) * 100}%`,
+                            "--fader-color": "#93c5fd",
                           } as React.CSSProperties
                         }
-                        aria-label="Backing Track Volume"
+                        aria-label="Worship Pad Volume"
                         min={0}
                         max={125}
-                        value={trackVolPct}
+                        value={padVolPct}
                         onChange={(e) =>
-                          handleTrackVolumeChange(Number(e.target.value))
+                          handleWorshipPadVolume(Number(e.target.value))
                         }
-                        onDoubleClick={() => handleTrackVolumeChange(75)}
+                        onDoubleClick={() => handleWorshipPadVolume(55)}
                       />
                     </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="track-module">
+                  <div className="track-controls-row">
                     <input
                       ref={trackInputRef}
                       type="file"
@@ -1521,281 +1275,932 @@ export default function App() {
                       {status?.backingTrackPlaying ? "Pause" : "Play"}
                     </button>
                   </div>
-                </div>
 
-                <div className="track-meta">
-                  <span
-                    className="track-name"
-                    title={status?.backingTrackName ?? ""}
+                  <div className="track-meta">
+                    <span
+                      className="track-name"
+                      title={status?.backingTrackName ?? ""}
+                    >
+                      {status?.backingTrackName ?? "No track loaded"}
+                    </span>
+                    <span className="track-time">
+                      {formatTimeMs(trackPos)} /{" "}
+                      {formatTimeMs(status?.backingTrackDurationMs ?? 0)}
+                    </span>
+                  </div>
+
+                  <input
+                    type="range"
+                    className="seek-bar"
+                    style={
+                      { "--fill": `${trackSeekPct}%` } as React.CSSProperties
+                    }
+                    aria-label="Backing Track Progress"
+                    min={0}
+                    max={trackDuration}
+                    value={trackPos}
+                    disabled={!status?.backingTrackName}
+                    onChange={(e) => handleTrackSeek(Number(e.target.value))}
+                  />
+
+                  <ParamSlider
+                    label="Track Vol"
+                    displayValue={`${trackVolPct}%`}
+                    value={trackVolPct}
+                    min={0}
+                    max={125}
+                    onChange={handleTrackVolumeChange}
+                    onReset={() => handleTrackVolumeChange(75)}
+                  />
+                </div>
+              )}
+            </section>
+          </aside>
+
+          {/* Main Stage: Layered Sound Channel Strips */}
+          <section className="layers-stage" aria-label="Sound Layers">
+            <div className="layers-row">
+              {layers.map((layer, idx) => {
+                const color = LAYER_COLORS[idx % LAYER_COLORS.length];
+                const layerVolPct = Math.round(layer.volume * 100);
+                const paramSet = new Set(layer.supportedParams);
+                return (
+                  <div
+                    key={`${idx}-${layer.soundId}`}
+                    className={`layer-strip ${layer.enabled ? "" : "muted"}`}
+                    style={{ "--layer-color": color } as React.CSSProperties}
                   >
-                    {status?.backingTrackName ??
-                      "No track loaded (WAV / FLAC / OGG)"}
-                  </span>
-                  <span className="track-time">
-                    {formatTimeMs(trackPos)} /{" "}
-                    {formatTimeMs(status?.backingTrackDurationMs ?? 0)}
-                  </span>
-                </div>
+                    <div className="layer-accent-bar" />
 
+                    <div className="layer-head">
+                      <button
+                        type="button"
+                        className="layer-name-btn"
+                        onClick={() => setPickerTarget(idx)}
+                        title="Click to change sound for this layer"
+                      >
+                        <span className="layer-name">{layer.soundName}</span>
+                        <span className="layer-cat">
+                          {layer.category} · {midiNoteLabel(layer.minNote)}–
+                          {midiNoteLabel(layer.maxNote)}
+                        </span>
+                      </button>
+
+                      <div className="layer-head-actions">
+                        <button
+                          type="button"
+                          className={`icon-btn ${editingLayerIdx === idx ? "active" : ""}`}
+                          onClick={() =>
+                            setEditingLayerIdx((cur) =>
+                              cur === idx ? null : idx
+                            )
+                          }
+                          title="Layer Controls (Tone, Envelope, Key Range)"
+                        >
+                          ≡
+                        </button>
+                        {idx > 0 && (
+                          <button
+                            type="button"
+                            className="icon-btn danger"
+                            onClick={() => handleRemoveLayer(idx)}
+                            title="Remove Layer"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Quick Sunday-Keys-style modifier slots */}
+                    <div className="layer-slots">
+                      <button
+                        type="button"
+                        className={`slot-btn ${layer.octaveShift !== 0 ? "lit" : ""}`}
+                        onClick={() => {
+                          const nextOct =
+                            layer.octaveShift === 0
+                              ? 1
+                              : layer.octaveShift === 1
+                                ? -1
+                                : 0;
+                          handleUpdateLayer(idx, { octaveShift: nextOct });
+                        }}
+                      >
+                        <span className="slot-sub">MIDI</span>
+                        <span className="slot-val">
+                          {layer.octaveShift === 0
+                            ? "Octave 0"
+                            : layer.octaveShift > 0
+                              ? `Octave +${layer.octaveShift}`
+                              : `Octave ${layer.octaveShift}`}
+                        </span>
+                      </button>
+
+                      {paramSet.has("chorus") && (
+                        <button
+                          type="button"
+                          className={`slot-btn ${layer.params.chorusMix > 0.02 ? "lit" : ""}`}
+                          onClick={() =>
+                            handleUpdateLayer(idx, {
+                              paramsPatch: {
+                                chorusMix:
+                                  layer.params.chorusMix > 0.02 ? 0.0 : 0.45,
+                              },
+                            })
+                          }
+                        >
+                          <span className="slot-sub">FX 01</span>
+                          <span className="slot-val">Chorus</span>
+                        </button>
+                      )}
+
+                      {paramSet.has("tremolo") && (
+                        <button
+                          type="button"
+                          className={`slot-btn ${layer.params.tremoloDepth > 0.02 ? "lit" : ""}`}
+                          onClick={() =>
+                            handleUpdateLayer(idx, {
+                              paramsPatch: {
+                                tremoloDepth:
+                                  layer.params.tremoloDepth > 0.02 ? 0.0 : 0.45,
+                              },
+                            })
+                          }
+                        >
+                          <span className="slot-sub">FX 02</span>
+                          <span className="slot-val">Tremolo</span>
+                        </button>
+                      )}
+
+                      {paramSet.has("delay") && (
+                        <button
+                          type="button"
+                          className={`slot-btn ${layer.params.delayMix > 0.02 ? "lit" : ""}`}
+                          onClick={() =>
+                            handleUpdateLayer(idx, {
+                              paramsPatch: {
+                                delayMix:
+                                  layer.params.delayMix > 0.02 ? 0.0 : 0.28,
+                              },
+                            })
+                          }
+                        >
+                          <span className="slot-sub">FX 03</span>
+                          <span className="slot-val">Delay</span>
+                        </button>
+                      )}
+
+                      {paramSet.has("reverb") && (
+                        <button
+                          type="button"
+                          className={`slot-btn ${layer.params.reverbMix > 0.02 ? "lit" : ""}`}
+                          onClick={() =>
+                            handleUpdateLayer(idx, {
+                              paramsPatch: {
+                                reverbMix:
+                                  layer.params.reverbMix > 0.02 ? 0.0 : 0.3,
+                              },
+                            })
+                          }
+                        >
+                          <span className="slot-sub">FX 04</span>
+                          <span className="slot-val">Reverb</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Vertical Fader + Enable/Mute Power */}
+                    <div className="layer-fader-area">
+                      <div className="v-fader-wrap tall">
+                        <input
+                          type="range"
+                          className="v-fader"
+                          style={
+                            {
+                              "--fill": `${(layerVolPct / 125) * 100}%`,
+                              "--fader-color": color,
+                            } as React.CSSProperties
+                          }
+                          aria-label={`${layer.soundName} Volume`}
+                          min={0}
+                          max={125}
+                          value={layerVolPct}
+                          onChange={(e) =>
+                            handleUpdateLayer(idx, {
+                              volume: Number(e.target.value) / 100,
+                            })
+                          }
+                          onDoubleClick={() =>
+                            handleUpdateLayer(idx, { volume: 0.85 })
+                          }
+                        />
+                      </div>
+                      <div className="layer-bottom-row">
+                        <button
+                          type="button"
+                          className={`power-btn ${layer.enabled ? "on" : ""}`}
+                          onClick={() =>
+                            handleUpdateLayer(idx, { enabled: !layer.enabled })
+                          }
+                          title={layer.enabled ? "Mute layer" : "Enable layer"}
+                        >
+                          {layer.enabled ? "ON" : "MUTED"}
+                        </button>
+                        <span className="layer-vol-pct">{layerVolPct}%</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {layers.length < 4 && (
+                <button
+                  type="button"
+                  className="add-layer-slot"
+                  onClick={() => setPickerTarget("add")}
+                >
+                  <span className="add-plus">+</span>
+                  <span>Add Sound</span>
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Bottom: Colored Layer Zone Bars + Compact 88-Key Piano */}
+      {!setupOpen && (
+        <footer className="piano-footer">
+          <div className="keyboard-header">
+            <div className="keyboard-title-group">
+              <label>Keyboard</label>
+              <span className="keyboard-hint">
+                {keyboardEnabled ? "Z/X octave · A–' play" : "Keys off"}
+              </span>
+            </div>
+
+            {chordDetectEnabled && (
+              <div className="chord-readout-wrap" aria-live="polite">
+                <span className="chord-label">CHORD</span>
+                <div className={`chord-badge ${detectedChord ? "active" : ""}`}>
+                  {detectedChord ?? "—"}
+                </div>
+              </div>
+            )}
+
+            <div className="keyboard-controls">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={chordDetectEnabled}
+                className={`toggle-pill ${chordDetectEnabled ? "on" : ""}`}
+                onClick={() => setChordDetectEnabled((v) => !v)}
+              >
+                <span className="toggle-dot" aria-hidden="true" />
+                <span>CHORD</span>
+              </button>
+
+              <div className="octave-stepper">
+                <button
+                  type="button"
+                  className="step-btn"
+                  onClick={() => setOctave((o) => Math.max(0, o - 1))}
+                  disabled={octave <= 0}
+                >
+                  −
+                </button>
+                <span className="octave-readout">C{octave}</span>
+                <button
+                  type="button"
+                  className="step-btn"
+                  onClick={() => setOctave((o) => Math.min(7, o + 1))}
+                  disabled={octave >= 7}
+                >
+                  +
+                </button>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={keyboardEnabled}
+                className={`toggle-pill ${keyboardEnabled ? "on" : ""}`}
+                onClick={() => setKeyboardEnabled((v) => !v)}
+              >
+                <span className="toggle-dot" aria-hidden="true" />
+                <span>{keyboardEnabled ? "KEYS ON" : "KEYS OFF"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Colored Layer Key-Range Bars (Sunday Keys style) */}
+          <div className="zone-bars" aria-hidden="true">
+            {layers.map((layer, idx) => {
+              const color = LAYER_COLORS[idx % LAYER_COLORS.length];
+              const leftPct = ((layer.minNote - 21) / 87) * 100;
+              const widthPct = Math.max(
+                1.5,
+                ((layer.maxNote - layer.minNote) / 87) * 100
+              );
+              return (
+                <div key={`zone-${idx}`} className="zone-track">
+                  <div
+                    className={`zone-fill ${layer.enabled ? "" : "muted"}`}
+                    style={{
+                      left: `${leftPct}%`,
+                      width: `${widthPct}%`,
+                      background: color,
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mini-piano" aria-label="88-Key Piano">
+            <div className="white-keys">
+              {WHITE_KEYS.map((key) => {
+                const midiActive = activeMidiNotes.has(key.note);
+                const localActive =
+                  activeKeyboardNotes.has(key.note) ||
+                  activeMouseNote === key.note;
+                const pressed = midiActive || localActive;
+                const qwertyLabel = keyboardEnabled
+                  ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
+                  : undefined;
+                return (
+                  <button
+                    key={key.note}
+                    type="button"
+                    tabIndex={-1}
+                    className={`piano-key white ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""}`}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      mousePressedRef.current = true;
+                      glissandoTo(key.note);
+                    }}
+                    onPointerEnter={(e) => {
+                      if (!mousePressedRef.current || (e.buttons & 1) === 0)
+                        return;
+                      glissandoTo(key.note);
+                    }}
+                  >
+                    {qwertyLabel && (
+                      <span className="key-cap">{qwertyLabel}</span>
+                    )}
+                    {key.cLabel && (
+                      <span className="octave-mark">{key.cLabel}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="black-keys">
+              {BLACK_KEYS.map((key) => {
+                const midiActive = activeMidiNotes.has(key.note);
+                const localActive =
+                  activeKeyboardNotes.has(key.note) ||
+                  activeMouseNote === key.note;
+                const pressed = midiActive || localActive;
+                const qwertyLabel = keyboardEnabled
+                  ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
+                  : undefined;
+                const leftPct =
+                  ((key.whiteIndex + 0.65) / WHITE_KEYS.length) * 100;
+                return (
+                  <button
+                    key={key.note}
+                    type="button"
+                    tabIndex={-1}
+                    style={{ left: `${leftPct}%` }}
+                    className={`piano-key black ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""}`}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      mousePressedRef.current = true;
+                      glissandoTo(key.note);
+                    }}
+                    onPointerEnter={(e) => {
+                      if (!mousePressedRef.current || (e.buttons & 1) === 0)
+                        return;
+                      e.stopPropagation();
+                      glissandoTo(key.note);
+                    }}
+                  >
+                    {qwertyLabel && (
+                      <span className="key-cap">{qwertyLabel}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </footer>
+      )}
+
+      {/* Voice Picker Modal */}
+      {pickerTarget !== null && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setPickerTarget(null)}
+        >
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Choose Voice"
+          >
+            <div className="modal-head">
+              <div className="sound-title-row">
+                <label>
+                  {pickerTarget === "add"
+                    ? "Add Sound Layer"
+                    : `Select Voice for Layer ${pickerTarget + 1}`}
+                </label>
+                {loadingTarget && (
+                  <span className="sound-loading-status">Loading samples…</span>
+                )}
+              </div>
+              <div className="modal-head-right">
                 <input
-                  type="range"
-                  className="seek-bar"
-                  style={{ "--fill": `${trackSeekPct}%` } as React.CSSProperties}
-                  aria-label="Backing Track Progress"
-                  min={0}
-                  max={trackDuration}
-                  value={trackPos}
-                  disabled={!status?.backingTrackName}
-                  onChange={(e) => handleTrackSeek(Number(e.target.value))}
+                  type="search"
+                  className="voice-search"
+                  placeholder={`Search ${sounds.length} voices…`}
+                  value={soundSearch}
+                  onChange={(e) => setSoundSearch(e.target.value)}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="btn-mini"
+                  onClick={() => setPickerTarget(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="category-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={selectedCategory === "All" && !soundSearch}
+                className={`cat-tab ${selectedCategory === "All" && !soundSearch ? "active" : ""}`}
+                onClick={() => {
+                  setSoundSearch("");
+                  setSelectedCategory("All");
+                }}
+              >
+                All ({sounds.length})
+              </button>
+              {soundCategories.map((cat) => {
+                const active = selectedCategory === cat.name && !soundSearch;
+                return (
+                  <button
+                    key={cat.name}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className={`cat-tab ${active ? "active" : ""}`}
+                    onClick={() => {
+                      setSoundSearch("");
+                      setSelectedCategory(cat.name);
+                    }}
+                  >
+                    {cat.name} ({cat.count})
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="modal-sound-grid">
+              {filteredSounds.map((sound, idx) => {
+                const isLoading = loadingTarget === sound.id;
+                const isFav = favoriteSet.has(sound.id);
+                return (
+                  <div
+                    key={sound.id}
+                    className={`sound-pad-wrap ${isLoading ? "loading" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      disabled={loadingTarget !== null}
+                      className="sound-pad-btn"
+                      onClick={() => handleAssignSound(pickerTarget, sound.id)}
+                    >
+                      <span className="sound-pad-meta">
+                        {isLoading
+                          ? "LOADING…"
+                          : soundSearch
+                            ? sound.category
+                            : String(idx + 1).padStart(2, "0")}
+                      </span>
+                      <span className="sound-pad-title">{sound.name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`star-btn ${isFav ? "starred" : ""}`}
+                      onClick={() => toggleFavorite(sound.id)}
+                      title={
+                        isFav ? "Remove from Favorites" : "Pin to Favorites"
+                      }
+                    >
+                      {isFav ? "★" : "☆"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Layer Controls Inspector Modal */}
+      {editingLayer && editingLayerIdx !== null && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setEditingLayerIdx(null)}
+        >
+          <div
+            className="modal-card inspector-card"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Layer Controls"
+          >
+            <div className="modal-head">
+              <div className="sound-title-row">
+                <label>{editingLayer.soundName}</label>
+                <span className="active-sound-pill">
+                  Layer {editingLayerIdx + 1} · {editingLayer.category}
+                </span>
+              </div>
+              <div className="modal-head-right">
+                <button
+                  type="button"
+                  className="btn-mini"
+                  onClick={() =>
+                    handleUpdateLayer(editingLayerIdx, {
+                      minNote: 21,
+                      maxNote: 108,
+                      octaveShift: 0,
+                      params: DEFAULT_SOUND_PARAMS,
+                    })
+                  }
+                >
+                  Reset Layer
+                </button>
+                <button
+                  type="button"
+                  className="btn-mini"
+                  onClick={() => setEditingLayerIdx(null)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+
+            <div className="controls-groups">
+              <div className="control-group mode-group">
+                <div className="group-title">Mode & Range</div>
+                <div className="mode-pills">
+                  {(["poly", "mono", "legato"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`mode-pill ${editingLayer.params.voiceMode === mode ? "active" : ""}`}
+                      onClick={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { voiceMode: mode },
+                        })
+                      }
+                    >
+                      {mode === "poly"
+                        ? "Poly"
+                        : mode === "mono"
+                          ? "Mono"
+                          : "Legato"}
+                    </button>
+                  ))}
+                </div>
+                <ParamSlider
+                  label="Low Key"
+                  displayValue={midiNoteLabel(editingLayer.minNote)}
+                  value={editingLayer.minNote}
+                  min={21}
+                  max={editingLayer.maxNote}
+                  onChange={(v) =>
+                    handleUpdateLayer(editingLayerIdx, { minNote: v })
+                  }
+                  onReset={() =>
+                    handleUpdateLayer(editingLayerIdx, { minNote: 21 })
+                  }
+                />
+                <ParamSlider
+                  label="High Key"
+                  displayValue={midiNoteLabel(editingLayer.maxNote)}
+                  value={editingLayer.maxNote}
+                  min={editingLayer.minNote}
+                  max={108}
+                  onChange={(v) =>
+                    handleUpdateLayer(editingLayerIdx, { maxNote: v })
+                  }
+                  onReset={() =>
+                    handleUpdateLayer(editingLayerIdx, { maxNote: 108 })
+                  }
                 />
               </div>
 
-              <div className="module-card">
-                <div className="module-header">
-                  <label>Worship Pad</label>
-                  <div className="module-actions">
-                    <div className="mini-vol">
-                      <span>Vol</span>
-                      <input
-                        type="range"
-                        className="filled-slider"
-                        style={
-                          {
-                            "--fill": `${(padVolPct / 125) * 100}%`,
-                          } as React.CSSProperties
-                        }
-                        aria-label="Worship Pad Volume"
-                        min={0}
-                        max={125}
-                        value={padVolPct}
-                        onChange={(e) =>
-                          handleWorshipPadVolume(Number(e.target.value))
-                        }
-                        onDoubleClick={() => handleWorshipPadVolume(55)}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={status?.worshipPadEnabled ?? false}
-                      className={`toggle-pill ${status?.worshipPadEnabled ? "on" : ""}`}
-                      onClick={handleWorshipPadToggle}
-                    >
-                      <span className="toggle-dot" aria-hidden="true" />
-                      <span>{status?.worshipPadEnabled ? "ON" : "OFF"}</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div
-                  className="pad-key-grid"
-                  role="group"
-                  aria-label="Worship Pad Key"
-                >
-                  {WORSHIP_KEYS.map((label, idx) => {
-                    const active =
-                      status?.worshipPadEnabled &&
-                      status?.worshipPadKey === idx;
-                    const selected = status?.worshipPadKey === idx;
-                    return (
-                      <button
-                        key={label}
-                        type="button"
-                        className={`pad-key-btn ${active ? "active" : selected ? "selected" : ""}`}
-                        onClick={() => handleWorshipPadKey(idx)}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
-
-            {/* Compact 88-Key Perform Keyboard */}
-            <section className="keyboard-section">
-              <div className="keyboard-header">
-                <div className="keyboard-title-group">
-                  <label>Keyboard</label>
-                  <span className="keyboard-hint">
-                    {keyboardEnabled
-                      ? "Z / X octave · A–' play"
-                      : "Computer keys off"}
-                  </span>
-                </div>
-
-                {chordDetectEnabled && (
-                  <div className="chord-readout-wrap" aria-live="polite">
-                    <span className="chord-label">CHORD</span>
-                    <div
-                      className={`chord-badge ${detectedChord ? "active" : ""}`}
-                    >
-                      {detectedChord ?? "—"}
-                    </div>
-                  </div>
-                )}
-
-                <div className="keyboard-controls">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={chordDetectEnabled}
-                    className={`toggle-pill ${chordDetectEnabled ? "on" : ""}`}
-                    onClick={() => setChordDetectEnabled((v) => !v)}
-                    title="Toggle Chord Detection"
-                  >
-                    <span className="toggle-dot" aria-hidden="true" />
-                    <span>CHORD</span>
-                  </button>
-
-                  <div className="octave-stepper" aria-label="Keyboard Octave">
-                    <button
-                      type="button"
-                      className="step-btn"
-                      onClick={() => setOctave((o) => Math.max(0, o - 1))}
-                      disabled={octave <= 0}
-                      title="Octave Down (Z)"
-                    >
-                      −
-                    </button>
-                    <span className="octave-readout">C{octave}</span>
-                    <button
-                      type="button"
-                      className="step-btn"
-                      onClick={() => setOctave((o) => Math.min(7, o + 1))}
-                      disabled={octave >= 7}
-                      title="Octave Up (X)"
-                    >
-                      +
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={keyboardEnabled}
-                    className={`toggle-pill ${keyboardEnabled ? "on" : ""}`}
-                    onClick={() => setKeyboardEnabled((v) => !v)}
-                  >
-                    <span className="toggle-dot" aria-hidden="true" />
-                    <span>{keyboardEnabled ? "KEYS ON" : "KEYS OFF"}</span>
-                  </button>
+              <div className="control-group">
+                <div className="group-title">Tone</div>
+                <div className="group-sliders">
+                  {editingParamsSet.has("hammer") && (
+                    <ParamSlider
+                      label="Hammer"
+                      displayValue={`${Math.round(editingLayer.params.hammerHardness * 100)}%`}
+                      value={Math.round(
+                        editingLayer.params.hammerHardness * 100
+                      )}
+                      min={0}
+                      max={100}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { hammerHardness: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            hammerHardness: DEFAULT_SOUND_PARAMS.hammerHardness,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("brightness") && (
+                    <ParamSlider
+                      label="Tone"
+                      displayValue={`${Math.round(editingLayer.params.brightness * 100)}%`}
+                      value={Math.round(editingLayer.params.brightness * 100)}
+                      min={0}
+                      max={100}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { brightness: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            brightness: DEFAULT_SOUND_PARAMS.brightness,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("resonance") && (
+                    <ParamSlider
+                      label="Resonance"
+                      displayValue={`${Math.round(editingLayer.params.resonance * 100)}%`}
+                      value={Math.round(editingLayer.params.resonance * 100)}
+                      min={0}
+                      max={85}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { resonance: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            resonance: DEFAULT_SOUND_PARAMS.resonance,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("veltrack") && (
+                    <ParamSlider
+                      label="Veltrack"
+                      displayValue={`${Math.round(editingLayer.params.velTrack * 100)}%`}
+                      value={Math.round(editingLayer.params.velTrack * 100)}
+                      min={0}
+                      max={100}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { velTrack: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            velTrack: DEFAULT_SOUND_PARAMS.velTrack,
+                          },
+                        })
+                      }
+                    />
+                  )}
                 </div>
               </div>
 
-              <div className="mini-piano" aria-label="88-Key Piano">
-                <div className="white-keys">
-                  {WHITE_KEYS.map((key) => {
-                    const midiActive = activeMidiNotes.has(key.note);
-                    const localActive =
-                      activeKeyboardNotes.has(key.note) ||
-                      activeMouseNote === key.note;
-                    const pressed = midiActive || localActive;
-                    const qwertyLabel = keyboardEnabled
-                      ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
-                      : undefined;
-                    return (
-                      <button
-                        key={key.note}
-                        type="button"
-                        tabIndex={-1}
-                        className={`piano-key white ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""}`}
-                        onPointerDown={(e) => {
-                          e.preventDefault();
-                          mousePressedRef.current = true;
-                          glissandoTo(key.note);
-                        }}
-                        onPointerEnter={(e) => {
-                          if (!mousePressedRef.current || (e.buttons & 1) === 0)
-                            return;
-                          glissandoTo(key.note);
-                        }}
-                      >
-                        {qwertyLabel && (
-                          <span className="key-cap">{qwertyLabel}</span>
-                        )}
-                        {key.cLabel && (
-                          <span className="octave-mark">{key.cLabel}</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="black-keys">
-                  {BLACK_KEYS.map((key) => {
-                    const midiActive = activeMidiNotes.has(key.note);
-                    const localActive =
-                      activeKeyboardNotes.has(key.note) ||
-                      activeMouseNote === key.note;
-                    const pressed = midiActive || localActive;
-                    const qwertyLabel = keyboardEnabled
-                      ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
-                      : undefined;
-                    const leftPct =
-                      ((key.whiteIndex + 0.65) / WHITE_KEYS.length) * 100;
-                    return (
-                      <button
-                        key={key.note}
-                        type="button"
-                        tabIndex={-1}
-                        style={{ left: `${leftPct}%` }}
-                        className={`piano-key black ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""}`}
-                        onPointerDown={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          mousePressedRef.current = true;
-                          glissandoTo(key.note);
-                        }}
-                        onPointerEnter={(e) => {
-                          if (!mousePressedRef.current || (e.buttons & 1) === 0)
-                            return;
-                          e.stopPropagation();
-                          glissandoTo(key.note);
-                        }}
-                      >
-                        {qwertyLabel && (
-                          <span className="key-cap">{qwertyLabel}</span>
-                        )}
-                      </button>
-                    );
-                  })}
+              <div className="control-group">
+                <div className="group-title">Effects & Envelope</div>
+                <div className="group-sliders">
+                  {editingParamsSet.has("chorus") && (
+                    <ParamSlider
+                      label="Chorus"
+                      displayValue={`${Math.round(editingLayer.params.chorusMix * 100)}%`}
+                      value={Math.round(editingLayer.params.chorusMix * 100)}
+                      min={0}
+                      max={100}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { chorusMix: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            chorusMix: DEFAULT_SOUND_PARAMS.chorusMix,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("tremolo") && (
+                    <ParamSlider
+                      label="Tremolo"
+                      displayValue={`${Math.round(editingLayer.params.tremoloDepth * 100)}%`}
+                      value={Math.round(editingLayer.params.tremoloDepth * 100)}
+                      min={0}
+                      max={100}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { tremoloDepth: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            tremoloDepth: DEFAULT_SOUND_PARAMS.tremoloDepth,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("delay") && (
+                    <ParamSlider
+                      label="Delay"
+                      displayValue={`${Math.round(editingLayer.params.delayMix * 100)}%`}
+                      value={Math.round(editingLayer.params.delayMix * 100)}
+                      min={0}
+                      max={60}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { delayMix: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            delayMix: DEFAULT_SOUND_PARAMS.delayMix,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("reverb") && (
+                    <ParamSlider
+                      label="Reverb"
+                      displayValue={`${Math.round(editingLayer.params.reverbMix * 100)}%`}
+                      value={Math.round(editingLayer.params.reverbMix * 100)}
+                      min={0}
+                      max={70}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { reverbMix: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            reverbMix: DEFAULT_SOUND_PARAMS.reverbMix,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("width") && (
+                    <ParamSlider
+                      label="Width"
+                      displayValue={`${Math.round(editingLayer.params.stereoWidth * 100)}%`}
+                      value={Math.round(editingLayer.params.stereoWidth * 100)}
+                      min={0}
+                      max={150}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { stereoWidth: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            stereoWidth: DEFAULT_SOUND_PARAMS.stereoWidth,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("glide") && (
+                    <ParamSlider
+                      label="Glide"
+                      displayValue={`${Math.round(editingLayer.params.glideMs)} ms`}
+                      value={Math.round(editingLayer.params.glideMs)}
+                      min={0}
+                      max={400}
+                      step={5}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { glideMs: v },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { glideMs: DEFAULT_SOUND_PARAMS.glideMs },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("attack") && (
+                    <ParamSlider
+                      label="Attack"
+                      displayValue={`${Math.round(editingLayer.params.attackMs)} ms`}
+                      value={Math.round(editingLayer.params.attackMs)}
+                      min={0}
+                      max={300}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { attackMs: v },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            attackMs: DEFAULT_SOUND_PARAMS.attackMs,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("release") && (
+                    <ParamSlider
+                      label="Release"
+                      displayValue={`${Math.round(editingLayer.params.releaseMs)} ms`}
+                      value={Math.round(editingLayer.params.releaseMs)}
+                      min={20}
+                      max={1200}
+                      step={5}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { releaseMs: v },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            releaseMs: DEFAULT_SOUND_PARAMS.releaseMs,
+                          },
+                        })
+                      }
+                    />
+                  )}
+                  {editingParamsSet.has("offset") && (
+                    <ParamSlider
+                      label="Offset"
+                      displayValue={`${Math.round(editingLayer.params.sampleOffsetMs)} ms`}
+                      value={Math.round(editingLayer.params.sampleOffsetMs)}
+                      min={0}
+                      max={40}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { sampleOffsetMs: v },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: {
+                            sampleOffsetMs: DEFAULT_SOUND_PARAMS.sampleOffsetMs,
+                          },
+                        })
+                      }
+                    />
+                  )}
                 </div>
               </div>
-            </section>
-          </>
-        )}
-      </div>
-
-      {/* Always-visible pinned footer */}
-      <footer className="bottom-bar">
-        <div className="volume-control">
-          <div className="field-row">
-            <label htmlFor="master-volume">Master Volume</label>
-            <span className="volume-value">{volumePct}%</span>
+            </div>
           </div>
-          <input
-            id="master-volume"
-            type="range"
-            className="filled-slider"
-            style={
-              { "--fill": `${(volumePct / 125) * 100}%` } as React.CSSProperties
-            }
-            min={0}
-            max={125}
-            value={volumePct}
-            onChange={(e) => handleVolumeChange(Number(e.target.value))}
-            onDoubleClick={() => handleVolumeChange(80)}
-          />
         </div>
-
-        <button
-          type="button"
-          className="btn btn-panic"
-          onClick={handlePanic}
-        >
-          Panic · All Notes Off
-        </button>
-      </footer>
+      )}
     </main>
   );
 }

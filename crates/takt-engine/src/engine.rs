@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicI8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicI8, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -14,6 +14,22 @@ use crate::EngineError;
 const MIDI_QUEUE_CAP: usize = 1024;
 const CTRL_QUEUE_CAP: usize = 128;
 const BANK_QUEUE_CAP: usize = 16;
+pub const MAX_LAYERS: usize = 4;
+
+/// Configuration and live state of a single instrument layer.
+#[derive(Debug, Clone)]
+pub struct LayerInfo {
+    pub sound_id: String,
+    pub sound_name: String,
+    pub category: String,
+    pub supported_params: Vec<&'static str>,
+    pub enabled: bool,
+    pub volume: f32,
+    pub min_note: u8,
+    pub max_note: u8,
+    pub octave_shift: i8,
+    pub params: SoundParams,
+}
 
 /// Summary of the current sound bank for UI display.
 #[derive(Debug, Clone)]
@@ -48,20 +64,49 @@ pub struct EngineStatus {
     pub worship_pad_key: i8,
     pub worship_pad_volume: f32,
     pub sound_params: SoundParams,
+    pub layers: Vec<LayerInfo>,
+}
+
+struct LayerAtomics {
+    enabled: Arc<AtomicBool>,
+    volume: Arc<AtomicU32>,
+    min_note: Arc<AtomicU8>,
+    max_note: Arc<AtomicU8>,
+    octave_shift: Arc<AtomicI8>,
+    params: Arc<AtomicSoundParams>,
+}
+
+impl Default for LayerAtomics {
+    fn default() -> Self {
+        Self {
+            enabled: Arc::new(AtomicBool::new(true)),
+            volume: Arc::new(AtomicU32::new(0.85_f32.to_bits())),
+            min_note: Arc::new(AtomicU8::new(21)),
+            max_note: Arc::new(AtomicU8::new(108)),
+            octave_shift: Arc::new(AtomicI8::new(0)),
+            params: Arc::new(AtomicSoundParams::default()),
+        }
+    }
+}
+
+struct LayerHostSlot {
+    bank_idx: Option<usize>,
+    atomics: LayerAtomics,
+    bank_tx: Producer<Option<Arc<SampleBank>>>,
+    reclaim_rx: Consumer<Option<Arc<SampleBank>>>,
 }
 
 /// Coordinates MIDI input, sample bank loading, and the real-time audio stream.
 pub struct TaktEngine {
     banks: Vec<LazySampleBank>,
     active_bank_idx: usize,
+    layer_slots: Vec<LayerHostSlot>,
     audio_config: AudioStreamConfig,
     audio_handle: Option<AudioStreamHandle>,
     midi_handles: Vec<MidiInputHandle>,
     desired_midi_devices: Vec<String>,
     midi_tx: Option<Arc<Mutex<Producer<MidiEvent>>>>,
     ctrl_tx: Producer<MidiEvent>,
-    bank_tx: Producer<Arc<SampleBank>>,
-    reclaim_rx: Consumer<Arc<SampleBank>>,
     master_volume: Arc<AtomicU32>,
     is_playing: Arc<AtomicBool>,
     active_voices: Arc<AtomicUsize>,
@@ -81,7 +126,6 @@ pub struct TaktEngine {
     pad_enabled: Arc<AtomicBool>,
     pad_key: Arc<AtomicI8>,
     pad_volume: Arc<AtomicU32>,
-    sound_params: Arc<AtomicSoundParams>,
 }
 
 impl TaktEngine {
@@ -93,22 +137,31 @@ impl TaktEngine {
         }
 
         let (ctrl_tx, _ctrl_rx) = RingBuffer::new(CTRL_QUEUE_CAP);
-        let (bank_tx, _bank_rx) = RingBuffer::new(BANK_QUEUE_CAP);
-        let (_reclaim_tx, reclaim_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (track_tx, _track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (_reclaim_track_tx, reclaim_track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+
+        let mut layer_slots = Vec::with_capacity(MAX_LAYERS);
+        for i in 0..MAX_LAYERS {
+            let (b_tx, _b_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+            let (_r_tx, r_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+            layer_slots.push(LayerHostSlot {
+                bank_idx: if i == 0 && !banks.is_empty() { Some(0) } else { None },
+                atomics: LayerAtomics::default(),
+                bank_tx: b_tx,
+                reclaim_rx: r_rx,
+            });
+        }
 
         let mut engine = Self {
             banks,
             active_bank_idx: 0,
+            layer_slots,
             audio_config: AudioStreamConfig::default(),
             audio_handle: None,
             midi_handles: Vec::new(),
             desired_midi_devices: Vec::new(),
             midi_tx: None,
             ctrl_tx,
-            bank_tx,
-            reclaim_rx,
             master_volume: Arc::new(AtomicU32::new(0.8_f32.to_bits())),
             is_playing: Arc::new(AtomicBool::new(false)),
             active_voices: Arc::new(AtomicUsize::new(0)),
@@ -126,7 +179,6 @@ impl TaktEngine {
             pad_enabled: Arc::new(AtomicBool::new(false)),
             pad_key: Arc::new(AtomicI8::new(0)),
             pad_volume: Arc::new(AtomicU32::new(0.55_f32.to_bits())),
-            sound_params: Arc::new(AtomicSoundParams::default()),
         };
 
         engine.restart_audio_stream()?;
@@ -222,18 +274,90 @@ impl TaktEngine {
         Ok(())
     }
 
-    /// Switches the active sound bank (lazy-loading on first use) without allocating or dropping on the audio thread.
+    /// Switches Layer 0's active sound bank (lazy-loading on first use).
     pub fn select_sound(&mut self, sound_id: &str) -> Result<(), EngineError> {
+        self.set_layer_sound(0, sound_id)
+    }
+
+    /// Assigns a sound bank to a layer slot (`0..MAX_LAYERS`).
+    pub fn set_layer_sound(&mut self, layer_idx: usize, sound_id: &str) -> Result<(), EngineError> {
+        if layer_idx >= MAX_LAYERS {
+            return Err(EngineError::SampleLoad(format!(
+                "layer index out of range: {layer_idx}"
+            )));
+        }
         let idx = self
             .banks
             .iter()
             .position(|b| b.id == sound_id)
             .ok_or_else(|| EngineError::SampleLoad(format!("unknown sound: {sound_id}")))?;
-        self.active_bank_idx = idx;
+        if layer_idx == 0 {
+            self.active_bank_idx = idx;
+        }
         self.drain_reclaimed_banks();
         let bank = self.banks[idx].get_or_load();
-        let _ = self.bank_tx.push(bank);
+        self.layer_slots[layer_idx].bank_idx = Some(idx);
+        let _ = self.layer_slots[layer_idx].bank_tx.push(Some(bank));
         Ok(())
+    }
+
+    /// Adds a new layer with the given sound ID in the first free slot, returning its index.
+    pub fn add_layer(&mut self, sound_id: &str) -> Result<usize, EngineError> {
+        let slot_idx = self
+            .layer_slots
+            .iter()
+            .position(|s| s.bank_idx.is_none())
+            .ok_or_else(|| {
+                EngineError::SampleLoad(format!("maximum of {MAX_LAYERS} layers reached"))
+            })?;
+        self.layer_slots[slot_idx]
+            .atomics
+            .enabled
+            .store(true, Ordering::Relaxed);
+        self.layer_slots[slot_idx]
+            .atomics
+            .volume
+            .store(0.8_f32.to_bits(), Ordering::Relaxed);
+        self.set_layer_sound(slot_idx, sound_id)?;
+        Ok(slot_idx)
+    }
+
+    /// Removes a layer slot (`1..MAX_LAYERS`; Layer 0 is always kept).
+    pub fn remove_layer(&mut self, layer_idx: usize) {
+        if layer_idx == 0 || layer_idx >= MAX_LAYERS {
+            return;
+        }
+        self.drain_reclaimed_banks();
+        self.layer_slots[layer_idx].bank_idx = None;
+        let _ = self.layer_slots[layer_idx].bank_tx.push(None);
+    }
+
+    /// Updates a specific layer's mix, range, octave, and DSP parameters lock-free.
+    pub fn update_layer(
+        &self,
+        layer_idx: usize,
+        enabled: bool,
+        volume: f32,
+        min_note: u8,
+        max_note: u8,
+        octave_shift: i8,
+        params: SoundParams,
+    ) {
+        let Some(slot) = self.layer_slots.get(layer_idx) else {
+            return;
+        };
+        slot.atomics.enabled.store(enabled, Ordering::Relaxed);
+        slot.atomics
+            .volume
+            .store(volume.clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
+        let lo = min_note.min(max_note).min(127);
+        let hi = max_note.max(min_note).min(127);
+        slot.atomics.min_note.store(lo, Ordering::Relaxed);
+        slot.atomics.max_note.store(hi, Ordering::Relaxed);
+        slot.atomics
+            .octave_shift
+            .store(octave_shift.clamp(-2, 2), Ordering::Relaxed);
+        slot.atomics.params.store(params);
     }
 
     pub fn set_master_volume(&self, volume: f32) {
@@ -301,7 +425,9 @@ impl TaktEngine {
     }
 
     pub fn set_sound_params(&self, params: SoundParams) {
-        self.sound_params.store(params);
+        if let Some(slot) = self.layer_slots.first() {
+            slot.atomics.params.store(params);
+        }
     }
 
     /// Returns the most recent MIDI Program Change (`0..=127`), clearing it atomically.
@@ -343,6 +469,33 @@ impl TaktEngine {
             .map(|t| (t.frames.len() as f64 / t.sample_rate as f64 * 1000.0) as u32)
             .unwrap_or(0);
 
+        let layers: Vec<LayerInfo> = self
+            .layer_slots
+            .iter()
+            .filter_map(|slot| {
+                let bank_idx = slot.bank_idx?;
+                let meta = &self.banks[bank_idx];
+                Some(LayerInfo {
+                    sound_id: meta.id.clone(),
+                    sound_name: meta.name.clone(),
+                    category: meta.category.clone(),
+                    supported_params: meta.supported_params.clone(),
+                    enabled: slot.atomics.enabled.load(Ordering::Relaxed),
+                    volume: f32::from_bits(slot.atomics.volume.load(Ordering::Relaxed)),
+                    min_note: slot.atomics.min_note.load(Ordering::Relaxed),
+                    max_note: slot.atomics.max_note.load(Ordering::Relaxed),
+                    octave_shift: slot.atomics.octave_shift.load(Ordering::Relaxed),
+                    params: slot.atomics.params.load(),
+                })
+            })
+            .collect();
+
+        let sound_params = self
+            .layer_slots
+            .first()
+            .map(|s| s.atomics.params.load())
+            .unwrap_or_default();
+
         EngineStatus {
             audio_device,
             sample_rate,
@@ -368,13 +521,16 @@ impl TaktEngine {
             worship_pad_enabled: self.pad_enabled.load(Ordering::Relaxed),
             worship_pad_key: self.pad_key.load(Ordering::Relaxed),
             worship_pad_volume: f32::from_bits(self.pad_volume.load(Ordering::Relaxed)),
-            sound_params: self.sound_params.load(),
+            sound_params,
+            layers,
         }
     }
 
     fn drain_reclaimed_banks(&mut self) {
-        while let Ok(old_bank) = self.reclaim_rx.pop() {
-            drop(old_bank);
+        for slot in &mut self.layer_slots {
+            while let Ok(old_bank) = slot.reclaim_rx.pop() {
+                drop(old_bank);
+            }
         }
         while let Ok(old_track) = self.reclaim_track_rx.pop() {
             drop(old_track);
@@ -387,20 +543,49 @@ impl TaktEngine {
 
         let (midi_tx, mut midi_rx) = RingBuffer::new(MIDI_QUEUE_CAP);
         let (ctrl_tx, mut ctrl_rx) = RingBuffer::new(CTRL_QUEUE_CAP);
-        let (bank_tx, mut bank_rx) = RingBuffer::new(BANK_QUEUE_CAP);
-        let (mut reclaim_tx, reclaim_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (track_tx, track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (reclaim_track_tx, reclaim_track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
 
         self.midi_tx = Some(Arc::new(Mutex::new(midi_tx)));
         self.ctrl_tx = ctrl_tx;
-        self.bank_tx = bank_tx;
-        self.reclaim_rx = reclaim_rx;
         self.track_tx = track_tx;
         self.reclaim_track_rx = reclaim_track_rx;
 
-        let mut active_bank = self.banks[self.active_bank_idx].get_or_load();
-        let mut pool = VoicePool::default();
+        struct AudioLayer {
+            pool: VoicePool,
+            bank: Option<Arc<SampleBank>>,
+            bank_rx: Consumer<Option<Arc<SampleBank>>>,
+            reclaim_tx: Producer<Option<Arc<SampleBank>>>,
+            enabled: Arc<AtomicBool>,
+            volume: Arc<AtomicU32>,
+            min_note: Arc<AtomicU8>,
+            max_note: Arc<AtomicU8>,
+            octave_shift: Arc<AtomicI8>,
+            params: Arc<AtomicSoundParams>,
+        }
+
+        let mut audio_layers: Vec<AudioLayer> = Vec::with_capacity(MAX_LAYERS);
+        for slot in &mut self.layer_slots {
+            let (b_tx, b_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+            let (r_tx, r_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+            slot.bank_tx = b_tx;
+            slot.reclaim_rx = r_rx;
+            let initial_bank = slot.bank_idx.map(|idx| self.banks[idx].get_or_load());
+            audio_layers.push(AudioLayer {
+                pool: VoicePool::default(),
+                bank: initial_bank,
+                bank_rx: b_rx,
+                reclaim_tx: r_tx,
+                enabled: Arc::clone(&slot.atomics.enabled),
+                volume: Arc::clone(&slot.atomics.volume),
+                min_note: Arc::clone(&slot.atomics.min_note),
+                max_note: Arc::clone(&slot.atomics.max_note),
+                octave_shift: Arc::clone(&slot.atomics.octave_shift),
+                params: Arc::clone(&slot.atomics.params),
+            });
+        }
+
+        let mut layer_scratch = vec![0.0_f32; 8192 * 2];
         let mut backing_player = BackingTrackPlayer::new(
             self.current_track.clone(),
             track_rx,
@@ -421,38 +606,100 @@ impl TaktEngine {
         let voices_atomic = Arc::clone(&self.active_voices);
         let midi_notes_atomic = Arc::clone(&self.midi_active_notes);
         let program_change_atomic = Arc::clone(&self.last_program_change);
-        let sound_params_atomic = Arc::clone(&self.sound_params);
         midi_notes_atomic[0].store(0, Ordering::Relaxed);
         midi_notes_atomic[1].store(0, Ordering::Relaxed);
 
+        let route_event_to_layer = |layer: &mut AudioLayer, ev: MidiEvent, sample_rate: u32| {
+            let Some(bank) = &layer.bank else {
+                return;
+            };
+            let params = layer.params.load();
+            let shift = layer.octave_shift.load(Ordering::Relaxed) as i16 * 12;
+            match ev {
+                MidiEvent::NoteOn {
+                    channel,
+                    note,
+                    velocity,
+                } => {
+                    if !layer.enabled.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let lo = layer.min_note.load(Ordering::Relaxed);
+                    let hi = layer.max_note.load(Ordering::Relaxed);
+                    if note < lo || note > hi {
+                        return;
+                    }
+                    let shifted = (note as i16 + shift).clamp(0, 127) as u8;
+                    layer.pool.handle_event_with_params(
+                        MidiEvent::NoteOn {
+                            channel,
+                            note: shifted,
+                            velocity,
+                        },
+                        bank,
+                        sample_rate,
+                        params,
+                    );
+                }
+                MidiEvent::NoteOff { channel, note } => {
+                    let shifted = (note as i16 + shift).clamp(0, 127) as u8;
+                    layer.pool.handle_event_with_params(
+                        MidiEvent::NoteOff {
+                            channel,
+                            note: shifted,
+                        },
+                        bank,
+                        sample_rate,
+                        params,
+                    );
+                }
+                other => {
+                    layer
+                        .pool
+                        .handle_event_with_params(other, bank, sample_rate, params);
+                }
+            }
+        };
+
         let handle = open_output_stream(&self.audio_config, move |output, channels, sample_rate| {
-            let params = sound_params_atomic.load();
-            // 1. Check for a new SampleBank; push the old one back for non-RT deallocation.
-            while let Ok(new_bank) = bank_rx.pop() {
-                pool.handle_event_with_params(MidiEvent::AllNotesOff, &active_bank, sample_rate, params);
-                midi_notes_atomic[0].store(0, Ordering::Relaxed);
-                midi_notes_atomic[1].store(0, Ordering::Relaxed);
-                let old_bank = std::mem::replace(&mut active_bank, new_bank);
-                let _ = reclaim_tx.push(old_bank);
+            // 1. Check for updated SampleBanks per layer.
+            for layer in &mut audio_layers {
+                while let Ok(new_bank) = layer.bank_rx.pop() {
+                    if let Some(prev_bank) = &layer.bank {
+                        let params = layer.params.load();
+                        layer.pool.handle_event_with_params(
+                            MidiEvent::AllNotesOff,
+                            prev_bank,
+                            sample_rate,
+                            params,
+                        );
+                    }
+                    let old_bank = std::mem::replace(&mut layer.bank, new_bank);
+                    let _ = layer.reclaim_tx.push(old_bank);
+                }
             }
 
-            // 2. Drain control events (panic, injected test events) and MIDI events.
+            // 2. Drain control events and MIDI events.
             while let Ok(ev) = ctrl_rx.pop() {
                 if matches!(ev, MidiEvent::AllNotesOff) {
                     midi_notes_atomic[0].store(0, Ordering::Relaxed);
                     midi_notes_atomic[1].store(0, Ordering::Relaxed);
                 }
-                pool.handle_event_with_params(ev, &active_bank, sample_rate, params);
+                for layer in &mut audio_layers {
+                    route_event_to_layer(layer, ev, sample_rate);
+                }
             }
             while let Ok(ev) = midi_rx.pop() {
                 match ev {
                     MidiEvent::NoteOn { note, .. } => {
                         let n = note & 127;
-                        midi_notes_atomic[(n >> 6) as usize].fetch_or(1u64 << (n & 63), Ordering::Relaxed);
+                        midi_notes_atomic[(n >> 6) as usize]
+                            .fetch_or(1u64 << (n & 63), Ordering::Relaxed);
                     }
                     MidiEvent::NoteOff { note, .. } => {
                         let n = note & 127;
-                        midi_notes_atomic[(n >> 6) as usize].fetch_and(!(1u64 << (n & 63)), Ordering::Relaxed);
+                        midi_notes_atomic[(n >> 6) as usize]
+                            .fetch_and(!(1u64 << (n & 63)), Ordering::Relaxed);
                     }
                     MidiEvent::AllNotesOff => {
                         midi_notes_atomic[0].store(0, Ordering::Relaxed);
@@ -463,17 +710,53 @@ impl TaktEngine {
                     }
                     _ => {}
                 }
-                pool.handle_event_with_params(ev, &active_bank, sample_rate, params);
+                for layer in &mut audio_layers {
+                    route_event_to_layer(layer, ev, sample_rate);
+                }
             }
 
-            // 3. Render active voices, backing track, and worship pad.
+            // 3. Render all active layers into `output`.
+            output.fill(0.0);
             let master_vol = f32::from_bits(volume_atomic.load(Ordering::Relaxed));
-            let any_active =
-                pool.render_with_params(output, channels, sample_rate, master_vol, &active_bank, params);
+            let mut any_active = false;
+            let mut total_voices = 0_usize;
+            let out_len = output.len().min(layer_scratch.len());
+
+            for layer in &mut audio_layers {
+                let Some(bank) = &layer.bank else {
+                    continue;
+                };
+                let layer_vol = if layer.enabled.load(Ordering::Relaxed) {
+                    f32::from_bits(layer.volume.load(Ordering::Relaxed))
+                } else {
+                    0.0
+                };
+                let params = layer.params.load();
+                let active = layer.pool.render_with_params(
+                    &mut layer_scratch[..out_len],
+                    channels,
+                    sample_rate,
+                    master_vol * layer_vol,
+                    bank,
+                    params,
+                );
+                if active {
+                    any_active = true;
+                    for i in 0..out_len {
+                        output[i] += layer_scratch[i];
+                    }
+                }
+                total_voices += layer.pool.active_voice_count();
+            }
+
+            for s in output.iter_mut() {
+                *s = (*s).clamp(-1.0, 1.0);
+            }
+
             backing_player.render_into(output, channels, sample_rate);
             worship_pad.render_into(output, channels, sample_rate);
             playing_atomic.store(any_active, Ordering::Relaxed);
-            voices_atomic.store(pool.active_voice_count(), Ordering::Relaxed);
+            voices_atomic.store(total_voices, Ordering::Relaxed);
         })?;
 
         self.audio_handle = Some(handle);

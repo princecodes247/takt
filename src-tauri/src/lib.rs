@@ -29,6 +29,18 @@ enum EngineCmd {
     SetWorshipPad(bool, i8, Reply<StatusDto>),
     SetWorshipPadVolume(f32),
     SetSoundParams(SoundParams),
+    AddLayer(String, Reply<StatusDto>),
+    RemoveLayer(usize, Reply<StatusDto>),
+    SetLayerSound(usize, String, Reply<StatusDto>),
+    UpdateLayer {
+        index: usize,
+        enabled: bool,
+        volume: f32,
+        min_note: u8,
+        max_note: u8,
+        octave_shift: i8,
+        params: SoundParams,
+    },
 }
 
 struct AppState {
@@ -128,6 +140,21 @@ impl From<SoundParamsDto> for SoundParams {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+struct LayerDto {
+    sound_id: String,
+    sound_name: String,
+    category: String,
+    supported_params: Vec<&'static str>,
+    enabled: bool,
+    volume: f32,
+    min_note: u8,
+    max_note: u8,
+    octave_shift: i8,
+    params: SoundParamsDto,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct StatusDto {
     audio_device: String,
     sample_rate: u32,
@@ -149,6 +176,7 @@ struct StatusDto {
     worship_pad_key: i8,
     worship_pad_volume: f32,
     sound_params: SoundParamsDto,
+    layers: Vec<LayerDto>,
 }
 
 #[derive(Serialize, Clone)]
@@ -197,6 +225,22 @@ fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
         worship_pad_key: st.worship_pad_key,
         worship_pad_volume: st.worship_pad_volume,
         sound_params: st.sound_params.into(),
+        layers: st
+            .layers
+            .into_iter()
+            .map(|l| LayerDto {
+                sound_id: l.sound_id,
+                sound_name: l.sound_name,
+                category: l.category,
+                supported_params: l.supported_params,
+                enabled: l.enabled,
+                volume: l.volume,
+                min_note: l.min_note,
+                max_note: l.max_note,
+                octave_shift: l.octave_shift,
+                params: l.params.into(),
+            })
+            .collect(),
     }
 }
 
@@ -401,6 +445,53 @@ fn set_sound_params(state: State<'_, AppState>, params: SoundParamsDto) -> Resul
         .map_err(|_| "engine thread stopped".to_string())
 }
 
+#[tauri::command]
+async fn add_layer(state: State<'_, AppState>, sound_id: String) -> Result<StatusDto, String> {
+    call_engine(&state.tx, |reply| EngineCmd::AddLayer(sound_id, reply)).await
+}
+
+#[tauri::command]
+async fn remove_layer(state: State<'_, AppState>, index: usize) -> Result<StatusDto, String> {
+    call_engine(&state.tx, |reply| EngineCmd::RemoveLayer(index, reply)).await
+}
+
+#[tauri::command]
+async fn set_layer_sound(
+    state: State<'_, AppState>,
+    index: usize,
+    sound_id: String,
+) -> Result<StatusDto, String> {
+    call_engine(&state.tx, |reply| {
+        EngineCmd::SetLayerSound(index, sound_id, reply)
+    })
+    .await
+}
+
+#[tauri::command]
+fn update_layer(
+    state: State<'_, AppState>,
+    index: usize,
+    enabled: bool,
+    volume: f32,
+    min_note: u8,
+    max_note: u8,
+    octave_shift: i8,
+    params: SoundParamsDto,
+) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::UpdateLayer {
+            index,
+            enabled,
+            volume,
+            min_note,
+            max_note,
+            octave_shift,
+            params: params.into(),
+        })
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
 pub fn run() {
     let (tx, rx) = mpsc::channel::<EngineCmd>();
     let watcher_tx = tx.clone();
@@ -565,6 +656,43 @@ pub fn run() {
                         EngineCmd::SetSoundParams(params) => {
                             engine.set_sound_params(params);
                         }
+                        EngineCmd::AddLayer(sound_id, reply) => {
+                            let res = engine
+                                .add_layer(&sound_id)
+                                .map(|_| to_status_dto(&mut engine))
+                                .map_err(|e| e.to_string());
+                            let _ = reply.send(res);
+                        }
+                        EngineCmd::RemoveLayer(idx, reply) => {
+                            engine.remove_layer(idx);
+                            let _ = reply.send(Ok(to_status_dto(&mut engine)));
+                        }
+                        EngineCmd::SetLayerSound(idx, sound_id, reply) => {
+                            let res = engine
+                                .set_layer_sound(idx, &sound_id)
+                                .map(|_| to_status_dto(&mut engine))
+                                .map_err(|e| e.to_string());
+                            let _ = reply.send(res);
+                        }
+                        EngineCmd::UpdateLayer {
+                            index,
+                            enabled,
+                            volume,
+                            min_note,
+                            max_note,
+                            octave_shift,
+                            params,
+                        } => {
+                            engine.update_layer(
+                                index,
+                                enabled,
+                                volume,
+                                min_note,
+                                max_note,
+                                octave_shift,
+                                params,
+                            );
+                        }
                     };
 
                     if let Some(cmd) = pending_cmd.take() {
@@ -635,6 +763,10 @@ pub fn run() {
             set_worship_pad,
             set_worship_pad_volume,
             set_sound_params,
+            add_layer,
+            remove_layer,
+            set_layer_sound,
+            update_layer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Takt");
