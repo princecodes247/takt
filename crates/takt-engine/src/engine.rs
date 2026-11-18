@@ -13,8 +13,8 @@ use crate::EngineError;
 
 const MIDI_QUEUE_CAP: usize = 1024;
 const CTRL_QUEUE_CAP: usize = 128;
-const BANK_QUEUE_CAP: usize = 16;
-pub const MAX_LAYERS: usize = 4;
+const BANK_QUEUE_CAP: usize = 64;
+const INITIAL_LAYER_CAP: usize = 64;
 
 /// Configuration and live state of a single instrument layer.
 #[derive(Debug, Clone)]
@@ -90,10 +90,25 @@ impl Default for LayerAtomics {
 }
 
 struct LayerHostSlot {
-    bank_idx: Option<usize>,
+    bank_idx: usize,
     atomics: LayerAtomics,
-    bank_tx: Producer<Option<Arc<SampleBank>>>,
-    reclaim_rx: Consumer<Option<Arc<SampleBank>>>,
+}
+
+struct AudioLayer {
+    pool: VoicePool,
+    bank: Arc<SampleBank>,
+    enabled: Arc<AtomicBool>,
+    volume: Arc<AtomicU32>,
+    min_note: Arc<AtomicU8>,
+    max_note: Arc<AtomicU8>,
+    octave_shift: Arc<AtomicI8>,
+    params: Arc<AtomicSoundParams>,
+}
+
+enum LayerOp {
+    Add(Box<AudioLayer>),
+    Remove(usize),
+    ReplaceBank(usize, Arc<SampleBank>),
 }
 
 /// Coordinates MIDI input, sample bank loading, and the real-time audio stream.
@@ -101,6 +116,9 @@ pub struct TaktEngine {
     banks: Vec<LazySampleBank>,
     active_bank_idx: usize,
     layer_slots: Vec<LayerHostSlot>,
+    layer_op_tx: Producer<LayerOp>,
+    reclaim_layer_rx: Consumer<Box<AudioLayer>>,
+    reclaim_bank_rx: Consumer<Arc<SampleBank>>,
     audio_config: AudioStreamConfig,
     audio_handle: Option<AudioStreamHandle>,
     midi_handles: Vec<MidiInputHandle>,
@@ -139,16 +157,15 @@ impl TaktEngine {
         let (ctrl_tx, _ctrl_rx) = RingBuffer::new(CTRL_QUEUE_CAP);
         let (track_tx, _track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (_reclaim_track_tx, reclaim_track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (layer_op_tx, _layer_op_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (_reclaim_layer_tx, reclaim_layer_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (_reclaim_bank_tx, reclaim_bank_rx) = RingBuffer::new(BANK_QUEUE_CAP);
 
-        let mut layer_slots = Vec::with_capacity(MAX_LAYERS);
-        for i in 0..MAX_LAYERS {
-            let (b_tx, _b_rx) = RingBuffer::new(BANK_QUEUE_CAP);
-            let (_r_tx, r_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let mut layer_slots = Vec::new();
+        if !banks.is_empty() {
             layer_slots.push(LayerHostSlot {
-                bank_idx: if i == 0 && !banks.is_empty() { Some(0) } else { None },
+                bank_idx: 0,
                 atomics: LayerAtomics::default(),
-                bank_tx: b_tx,
-                reclaim_rx: r_rx,
             });
         }
 
@@ -156,6 +173,9 @@ impl TaktEngine {
             banks,
             active_bank_idx: 0,
             layer_slots,
+            layer_op_tx,
+            reclaim_layer_rx,
+            reclaim_bank_rx,
             audio_config: AudioStreamConfig::default(),
             audio_handle: None,
             midi_handles: Vec::new(),
@@ -279,9 +299,9 @@ impl TaktEngine {
         self.set_layer_sound(0, sound_id)
     }
 
-    /// Assigns a sound bank to a layer slot (`0..MAX_LAYERS`).
+    /// Assigns a sound bank to a layer slot (`0..layer_slots.len()`).
     pub fn set_layer_sound(&mut self, layer_idx: usize, sound_id: &str) -> Result<(), EngineError> {
-        if layer_idx >= MAX_LAYERS {
+        if layer_idx >= self.layer_slots.len() {
             return Err(EngineError::SampleLoad(format!(
                 "layer index out of range: {layer_idx}"
             )));
@@ -296,40 +316,49 @@ impl TaktEngine {
         }
         self.drain_reclaimed_banks();
         let bank = self.banks[idx].get_or_load();
-        self.layer_slots[layer_idx].bank_idx = Some(idx);
-        let _ = self.layer_slots[layer_idx].bank_tx.push(Some(bank));
+        self.layer_slots[layer_idx].bank_idx = idx;
+        let _ = self.layer_op_tx.push(LayerOp::ReplaceBank(layer_idx, bank));
         Ok(())
     }
 
-    /// Adds a new layer with the given sound ID in the first free slot, returning its index.
+    /// Adds a new layer with the given sound ID and returns its index (no fixed limit).
     pub fn add_layer(&mut self, sound_id: &str) -> Result<usize, EngineError> {
-        let slot_idx = self
-            .layer_slots
+        let idx = self
+            .banks
             .iter()
-            .position(|s| s.bank_idx.is_none())
-            .ok_or_else(|| {
-                EngineError::SampleLoad(format!("maximum of {MAX_LAYERS} layers reached"))
-            })?;
-        self.layer_slots[slot_idx]
-            .atomics
-            .enabled
-            .store(true, Ordering::Relaxed);
-        self.layer_slots[slot_idx]
-            .atomics
-            .volume
-            .store(0.8_f32.to_bits(), Ordering::Relaxed);
-        self.set_layer_sound(slot_idx, sound_id)?;
-        Ok(slot_idx)
+            .position(|b| b.id == sound_id)
+            .ok_or_else(|| EngineError::SampleLoad(format!("unknown sound: {sound_id}")))?;
+        self.drain_reclaimed_banks();
+        let bank = self.banks[idx].get_or_load();
+        let atomics = LayerAtomics::default();
+        atomics.volume.store(0.8_f32.to_bits(), Ordering::Relaxed);
+        let audio_layer = Box::new(AudioLayer {
+            pool: VoicePool::default(),
+            bank,
+            enabled: Arc::clone(&atomics.enabled),
+            volume: Arc::clone(&atomics.volume),
+            min_note: Arc::clone(&atomics.min_note),
+            max_note: Arc::clone(&atomics.max_note),
+            octave_shift: Arc::clone(&atomics.octave_shift),
+            params: Arc::clone(&atomics.params),
+        });
+        let new_idx = self.layer_slots.len();
+        self.layer_slots.push(LayerHostSlot {
+            bank_idx: idx,
+            atomics,
+        });
+        let _ = self.layer_op_tx.push(LayerOp::Add(audio_layer));
+        Ok(new_idx)
     }
 
-    /// Removes a layer slot (`1..MAX_LAYERS`; Layer 0 is always kept).
+    /// Removes a layer slot (`1..layer_slots.len()`; Layer 0 is always kept).
     pub fn remove_layer(&mut self, layer_idx: usize) {
-        if layer_idx == 0 || layer_idx >= MAX_LAYERS {
+        if layer_idx == 0 || layer_idx >= self.layer_slots.len() {
             return;
         }
         self.drain_reclaimed_banks();
-        self.layer_slots[layer_idx].bank_idx = None;
-        let _ = self.layer_slots[layer_idx].bank_tx.push(None);
+        self.layer_slots.remove(layer_idx);
+        let _ = self.layer_op_tx.push(LayerOp::Remove(layer_idx));
     }
 
     /// Updates a specific layer's mix, range, octave, and DSP parameters lock-free.
@@ -472,10 +501,9 @@ impl TaktEngine {
         let layers: Vec<LayerInfo> = self
             .layer_slots
             .iter()
-            .filter_map(|slot| {
-                let bank_idx = slot.bank_idx?;
-                let meta = &self.banks[bank_idx];
-                Some(LayerInfo {
+            .map(|slot| {
+                let meta = &self.banks[slot.bank_idx];
+                LayerInfo {
                     sound_id: meta.id.clone(),
                     sound_name: meta.name.clone(),
                     category: meta.category.clone(),
@@ -486,7 +514,7 @@ impl TaktEngine {
                     max_note: slot.atomics.max_note.load(Ordering::Relaxed),
                     octave_shift: slot.atomics.octave_shift.load(Ordering::Relaxed),
                     params: slot.atomics.params.load(),
-                })
+                }
             })
             .collect();
 
@@ -527,10 +555,11 @@ impl TaktEngine {
     }
 
     fn drain_reclaimed_banks(&mut self) {
-        for slot in &mut self.layer_slots {
-            while let Ok(old_bank) = slot.reclaim_rx.pop() {
-                drop(old_bank);
-            }
+        while let Ok(old_layer) = self.reclaim_layer_rx.pop() {
+            drop(old_layer);
+        }
+        while let Ok(old_bank) = self.reclaim_bank_rx.pop() {
+            drop(old_bank);
         }
         while let Ok(old_track) = self.reclaim_track_rx.pop() {
             drop(old_track);
@@ -545,44 +574,32 @@ impl TaktEngine {
         let (ctrl_tx, mut ctrl_rx) = RingBuffer::new(CTRL_QUEUE_CAP);
         let (track_tx, track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (reclaim_track_tx, reclaim_track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (layer_op_tx, mut layer_op_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (mut reclaim_layer_tx, reclaim_layer_rx) = RingBuffer::new(BANK_QUEUE_CAP);
+        let (mut reclaim_bank_tx, reclaim_bank_rx) = RingBuffer::new(BANK_QUEUE_CAP);
 
         self.midi_tx = Some(Arc::new(Mutex::new(midi_tx)));
         self.ctrl_tx = ctrl_tx;
         self.track_tx = track_tx;
         self.reclaim_track_rx = reclaim_track_rx;
+        self.layer_op_tx = layer_op_tx;
+        self.reclaim_layer_rx = reclaim_layer_rx;
+        self.reclaim_bank_rx = reclaim_bank_rx;
 
-        struct AudioLayer {
-            pool: VoicePool,
-            bank: Option<Arc<SampleBank>>,
-            bank_rx: Consumer<Option<Arc<SampleBank>>>,
-            reclaim_tx: Producer<Option<Arc<SampleBank>>>,
-            enabled: Arc<AtomicBool>,
-            volume: Arc<AtomicU32>,
-            min_note: Arc<AtomicU8>,
-            max_note: Arc<AtomicU8>,
-            octave_shift: Arc<AtomicI8>,
-            params: Arc<AtomicSoundParams>,
-        }
-
-        let mut audio_layers: Vec<AudioLayer> = Vec::with_capacity(MAX_LAYERS);
-        for slot in &mut self.layer_slots {
-            let (b_tx, b_rx) = RingBuffer::new(BANK_QUEUE_CAP);
-            let (r_tx, r_rx) = RingBuffer::new(BANK_QUEUE_CAP);
-            slot.bank_tx = b_tx;
-            slot.reclaim_rx = r_rx;
-            let initial_bank = slot.bank_idx.map(|idx| self.banks[idx].get_or_load());
-            audio_layers.push(AudioLayer {
+        let mut audio_layers: Vec<Box<AudioLayer>> =
+            Vec::with_capacity(INITIAL_LAYER_CAP.max(self.layer_slots.len()));
+        for slot in &self.layer_slots {
+            let initial_bank = self.banks[slot.bank_idx].get_or_load();
+            audio_layers.push(Box::new(AudioLayer {
                 pool: VoicePool::default(),
                 bank: initial_bank,
-                bank_rx: b_rx,
-                reclaim_tx: r_tx,
                 enabled: Arc::clone(&slot.atomics.enabled),
                 volume: Arc::clone(&slot.atomics.volume),
                 min_note: Arc::clone(&slot.atomics.min_note),
                 max_note: Arc::clone(&slot.atomics.max_note),
                 octave_shift: Arc::clone(&slot.atomics.octave_shift),
                 params: Arc::clone(&slot.atomics.params),
-            });
+            }));
         }
 
         let mut layer_scratch = vec![0.0_f32; 8192 * 2];
@@ -610,9 +627,6 @@ impl TaktEngine {
         midi_notes_atomic[1].store(0, Ordering::Relaxed);
 
         let route_event_to_layer = |layer: &mut AudioLayer, ev: MidiEvent, sample_rate: u32| {
-            let Some(bank) = &layer.bank else {
-                return;
-            };
             let params = layer.params.load();
             let shift = layer.octave_shift.load(Ordering::Relaxed) as i16 * 12;
             match ev {
@@ -636,7 +650,7 @@ impl TaktEngine {
                             note: shifted,
                             velocity,
                         },
-                        bank,
+                        &layer.bank,
                         sample_rate,
                         params,
                     );
@@ -648,7 +662,7 @@ impl TaktEngine {
                             channel,
                             note: shifted,
                         },
-                        bank,
+                        &layer.bank,
                         sample_rate,
                         params,
                     );
@@ -656,26 +670,39 @@ impl TaktEngine {
                 other => {
                     layer
                         .pool
-                        .handle_event_with_params(other, bank, sample_rate, params);
+                        .handle_event_with_params(other, &layer.bank, sample_rate, params);
                 }
             }
         };
 
         let handle = open_output_stream(&self.audio_config, move |output, channels, sample_rate| {
-            // 1. Check for updated SampleBanks per layer.
-            for layer in &mut audio_layers {
-                while let Ok(new_bank) = layer.bank_rx.pop() {
-                    if let Some(prev_bank) = &layer.bank {
-                        let params = layer.params.load();
-                        layer.pool.handle_event_with_params(
-                            MidiEvent::AllNotesOff,
-                            prev_bank,
-                            sample_rate,
-                            params,
-                        );
+            // 1. Apply layer add/remove/replace operations from the engine thread.
+            while let Ok(op) = layer_op_rx.pop() {
+                match op {
+                    LayerOp::Add(new_layer) => {
+                        audio_layers.push(new_layer);
                     }
-                    let old_bank = std::mem::replace(&mut layer.bank, new_bank);
-                    let _ = layer.reclaim_tx.push(old_bank);
+                    LayerOp::Remove(idx) => {
+                        if idx < audio_layers.len() {
+                            let removed = audio_layers.remove(idx);
+                            let _ = reclaim_layer_tx.push(removed);
+                        }
+                    }
+                    LayerOp::ReplaceBank(idx, new_bank) => {
+                        if let Some(layer) = audio_layers.get_mut(idx) {
+                            let params = layer.params.load();
+                            layer.pool.handle_event_with_params(
+                                MidiEvent::AllNotesOff,
+                                &layer.bank,
+                                sample_rate,
+                                params,
+                            );
+                            let old_bank = std::mem::replace(&mut layer.bank, new_bank);
+                            let _ = reclaim_bank_tx.push(old_bank);
+                        } else {
+                            let _ = reclaim_bank_tx.push(new_bank);
+                        }
+                    }
                 }
             }
 
@@ -723,9 +750,6 @@ impl TaktEngine {
             let out_len = output.len().min(layer_scratch.len());
 
             for layer in &mut audio_layers {
-                let Some(bank) = &layer.bank else {
-                    continue;
-                };
                 let layer_vol = if layer.enabled.load(Ordering::Relaxed) {
                     f32::from_bits(layer.volume.load(Ordering::Relaxed))
                 } else {
@@ -737,7 +761,7 @@ impl TaktEngine {
                     channels,
                     sample_rate,
                     master_vol * layer_vol,
-                    bank,
+                    &layer.bank,
                     params,
                 );
                 if active {

@@ -627,13 +627,16 @@ input:focus-visible {
 .layers-row {
   flex: 1 1 auto;
   min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(170px, 1fr));
+  display: flex;
   gap: 10px;
   width: 100%;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .layer-strip {
+  flex: 1 0 185px;
+  max-width: 240px;
   background: linear-gradient(180deg, #181c26 0%, #0d1016 100%);
   border: 1px solid var(--border-strong);
   border-radius: 11px;
@@ -862,6 +865,7 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 }
 
 .add-layer-slot {
+  flex: 0 0 150px;
   background: rgba(11, 13, 18, 0.5);
   border: 2px dashed var(--border-strong);
   border-radius: 11px;

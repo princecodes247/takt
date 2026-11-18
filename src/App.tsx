@@ -1471,20 +1471,18 @@ export default function App() {
                   Split @ C4
                 </button>
               )}
-              {layers.length < 4 && (
-                <button
-                  type="button"
-                  className="btn-mini active"
-                  onClick={() => setPickerTarget("add")}
-                >
-                  + Add Layer
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn-mini active"
+                onClick={() => setPickerTarget("add")}
+              >
+                + Add Layer
+              </button>
             </div>
           </div>
 
           <div className="zones-rows">
-            {[0, 1, 2, 3].map((slotIdx) => {
+            {[...layers.map((_, i) => i), layers.length].map((slotIdx) => {
               const layer = layers[slotIdx];
               const color = LAYER_COLORS[slotIdx % LAYER_COLORS.length];
               if (!layer) {
@@ -2075,16 +2073,14 @@ export default function App() {
                 );
               })}
 
-              {layers.length < 4 && (
-                <button
-                  type="button"
-                  className="add-layer-slot"
-                  onClick={() => setPickerTarget("add")}
-                >
-                  <span className="add-plus">+</span>
-                  <span>Add Sound</span>
-                </button>
-              )}
+              <button
+                type="button"
+                className="add-layer-slot"
+                onClick={() => setPickerTarget("add")}
+              >
+                <span className="add-plus">+</span>
+                <span>Add Sound</span>
+              </button>
             </div>
 
             {/* Snapshots Bar inside current Patch */}
