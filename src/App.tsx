@@ -23,7 +23,8 @@ interface StatusDto {
   sampleRate: number;
   bufferSize: number | null;
   estimatedLatencyMs: number;
-  midiDevice: string | null;
+  midiDevices: string[];
+  desiredMidiDevices: string[];
   activeSoundId: string;
   masterVolume: number;
   isPlaying: boolean;
@@ -85,7 +86,8 @@ interface TelemetryDto {
   isPlaying: boolean;
   activeVoices: number;
   estimatedLatencyMs: number;
-  midiDevice: string | null;
+  midiDevices: string[];
+  desiredMidiDevices: string[];
   activeMidiNotes: number[];
   backingTrackPlaying: boolean;
   backingTrackPositionMs: number;
@@ -245,7 +247,8 @@ export default function App() {
               isPlaying: event.payload.isPlaying,
               activeVoices: event.payload.activeVoices,
               estimatedLatencyMs: event.payload.estimatedLatencyMs,
-              midiDevice: event.payload.midiDevice,
+              midiDevices: event.payload.midiDevices,
+              desiredMidiDevices: event.payload.desiredMidiDevices,
               backingTrackPlaying: event.payload.backingTrackPlaying,
               backingTrackPositionMs: event.payload.backingTrackPositionMs,
               backingTrackDurationMs: event.payload.backingTrackDurationMs,
@@ -560,11 +563,15 @@ export default function App() {
       ? currentAudioDevice.supportedBufferSizes
       : DEFAULT_BUFFERS;
 
-  const handleMidiChange = async (value: string) => {
+  const handleToggleMidiDevice = async (deviceName: string) => {
     setError(null);
+    const current = status?.desiredMidiDevices ?? [];
+    const nextDevices = current.includes(deviceName)
+      ? current.filter((d) => d !== deviceName)
+      : [...current, deviceName];
     try {
-      const next = await invoke<StatusDto>("select_midi_device", {
-        deviceName: value === "" ? null : value,
+      const next = await invoke<StatusDto>("set_midi_devices", {
+        devices: nextDevices,
       });
       setStatus(next);
     } catch (err) {
@@ -666,23 +673,57 @@ export default function App() {
 
       <section className="grid-2">
         <div className="field">
-          <label htmlFor="midi-select">MIDI Input</label>
-          <select
-            id="midi-select"
-            value={status?.midiDevice ?? ""}
-            onChange={(e) => handleMidiChange(e.target.value)}
-          >
-            <option value="">
-              {midiDevices.length === 0
-                ? "No MIDI devices connected"
-                : "Select MIDI keyboard…"}
-            </option>
-            {midiDevices.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+          <div className="field-row">
+            <label>MIDI Inputs (Multi)</label>
+            <span className="midi-count">
+              {status?.midiDevices.length ?? 0} active
+            </span>
+          </div>
+          <div className="midi-device-list" role="group" aria-label="MIDI Inputs">
+            {midiDevices.length === 0 &&
+            (status?.desiredMidiDevices.length ?? 0) === 0 ? (
+              <span className="midi-empty">No MIDI devices connected</span>
+            ) : (
+              <>
+                {midiDevices.map((name) => {
+                  const enabled =
+                    status?.desiredMidiDevices.includes(name) ?? false;
+                  const connected =
+                    status?.midiDevices.includes(name) ?? false;
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      className={`midi-chip ${connected ? "connected" : enabled ? "enabled" : ""}`}
+                      onClick={() => handleToggleMidiDevice(name)}
+                      title={
+                        connected
+                          ? "Active — click to disable"
+                          : "Click to enable"
+                      }
+                    >
+                      <span className="midi-chip-dot" aria-hidden="true" />
+                      <span>{name}</span>
+                    </button>
+                  );
+                })}
+                {(status?.desiredMidiDevices ?? [])
+                  .filter((name) => !midiDevices.includes(name))
+                  .map((name) => (
+                    <button
+                      key={`offline-${name}`}
+                      type="button"
+                      className="midi-chip offline"
+                      onClick={() => handleToggleMidiDevice(name)}
+                      title="Remembered device is offline (will auto-reconnect when plugged in). Click to forget."
+                    >
+                      <span className="midi-chip-dot" aria-hidden="true" />
+                      <span>{name} (Offline) ×</span>
+                    </button>
+                  ))}
+              </>
+            )}
+          </div>
         </div>
 
         <div className="field">

@@ -14,6 +14,7 @@ type Reply<T> = mpsc::SyncSender<Result<T, String>>;
 enum EngineCmd {
     GetInitialState(Reply<InitialStateDto>),
     SelectMidi(Option<String>, Reply<StatusDto>),
+    SetMidiDevices(Vec<String>, Reply<StatusDto>),
     SelectAudio(Option<String>, Option<u32>, Reply<StatusDto>),
     SelectSound(String, Reply<StatusDto>),
     SetVolume(f32),
@@ -132,7 +133,8 @@ struct StatusDto {
     sample_rate: u32,
     buffer_size: Option<u32>,
     estimated_latency_ms: f32,
-    midi_device: Option<String>,
+    midi_devices: Vec<String>,
+    desired_midi_devices: Vec<String>,
     active_sound_id: String,
     master_volume: f32,
     is_playing: bool,
@@ -164,7 +166,8 @@ struct TelemetryDto {
     is_playing: bool,
     active_voices: usize,
     estimated_latency_ms: f32,
-    midi_device: Option<String>,
+    midi_devices: Vec<String>,
+    desired_midi_devices: Vec<String>,
     active_midi_notes: Vec<u8>,
     backing_track_playing: bool,
     backing_track_position_ms: u32,
@@ -178,7 +181,8 @@ fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
         sample_rate: st.sample_rate,
         buffer_size: st.buffer_size,
         estimated_latency_ms: st.estimated_latency_ms,
-        midi_device: st.midi_device,
+        midi_devices: st.midi_devices,
+        desired_midi_devices: st.desired_midi_devices,
         active_sound_id: st.active_sound_id,
         master_volume: st.master_volume,
         is_playing: st.is_playing,
@@ -252,6 +256,14 @@ async fn select_midi_device(
     device_name: Option<String>,
 ) -> Result<StatusDto, String> {
     call_engine(&state.tx, |reply| EngineCmd::SelectMidi(device_name, reply)).await
+}
+
+#[tauri::command]
+async fn set_midi_devices(
+    state: State<'_, AppState>,
+    devices: Vec<String>,
+) -> Result<StatusDto, String> {
+    call_engine(&state.tx, |reply| EngineCmd::SetMidiDevices(devices, reply)).await
 }
 
 #[tauri::command]
@@ -409,9 +421,34 @@ pub fn run() {
             .flatten()
             .find(|p| p.exists());
 
+            let midi_config_path = app
+                .path()
+                .app_config_dir()
+                .ok()
+                .map(|p| p.join("midi_config.json"));
+
             std::thread::spawn(move || {
                 let mut engine = TaktEngine::new(samples_dir.as_deref())
                     .expect("failed to initialize TaktEngine");
+
+                if let Some(ref cfg_path) = midi_config_path {
+                    if let Ok(raw) = std::fs::read_to_string(cfg_path) {
+                        if let Ok(saved) = serde_json::from_str::<Vec<String>>(&raw) {
+                            engine.set_midi_devices(saved);
+                        }
+                    }
+                }
+
+                let save_midi_config = |devices: &[String]| {
+                    if let Some(ref cfg_path) = midi_config_path {
+                        if let Some(parent) = cfg_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        if let Ok(json) = serde_json::to_string_pretty(devices) {
+                            let _ = std::fs::write(cfg_path, json);
+                        }
+                    }
+                };
 
                 let _midi_watcher = MidiDeviceWatcher::new(move || {
                     let _ = watcher_tx.send(EngineCmd::MidiDevicesChanged);
@@ -447,9 +484,19 @@ pub fn run() {
                         EngineCmd::SelectMidi(name, reply) => {
                             let res = engine
                                 .select_midi_input(name)
-                                .map(|_| to_status_dto(&mut engine))
+                                .map(|_| {
+                                    let dto = to_status_dto(&mut engine);
+                                    save_midi_config(&dto.desired_midi_devices);
+                                    dto
+                                })
                                 .map_err(|e| e.to_string());
                             let _ = reply.send(res);
+                        }
+                        EngineCmd::SetMidiDevices(devices, reply) => {
+                            engine.set_midi_devices(devices);
+                            let dto = to_status_dto(&mut engine);
+                            save_midi_config(&dto.desired_midi_devices);
+                            let _ = reply.send(Ok(dto));
                         }
                         EngineCmd::SelectAudio(name, buf, reply) => {
                             let res = engine
@@ -532,11 +579,7 @@ pub fn run() {
                         let current_midi = collect_midi_names();
                         if current_midi != last_midi_list {
                             last_midi_list = current_midi.clone();
-                            if let Some(active_name) = engine.status().midi_device {
-                                if !current_midi.contains(&active_name) {
-                                    let _ = engine.select_midi_input(None);
-                                }
-                            }
+                            engine.sync_midi_connections();
                             let _ = app_handle.emit("takt://midi-devices", current_midi);
                         }
                     }
@@ -550,7 +593,8 @@ pub fn run() {
                                 is_playing: st.is_playing,
                                 active_voices: st.active_voices,
                                 estimated_latency_ms: st.estimated_latency_ms,
-                                midi_device: st.midi_device,
+                                midi_devices: st.midi_devices,
+                                desired_midi_devices: st.desired_midi_devices,
                                 active_midi_notes: st.active_midi_notes,
                                 backing_track_playing: st.backing_track_playing,
                                 backing_track_position_ms: st.backing_track_position_ms,
@@ -573,6 +617,7 @@ pub fn run() {
             get_initial_state,
             refresh_audio_devices,
             select_midi_device,
+            set_midi_devices,
             select_audio_device,
             select_sound,
             set_volume,

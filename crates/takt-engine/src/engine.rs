@@ -1,12 +1,12 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicI8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::audio::{open_output_stream, AudioStreamConfig, AudioStreamHandle};
 use crate::backing::{synthesize_demo_backing_track, BackingTrackPlayer, WorshipPadPlayer};
-use crate::midi::{open_midi_input, MidiEvent, MidiInputHandle};
+use crate::midi::{list_midi_devices, open_midi_input, MidiEvent, MidiInputHandle};
 use crate::sampler::{decode_audio_bytes, discover_banks, LazySampleBank, SampleBank, SampleData};
 use crate::voice::{AtomicSoundParams, SoundParams, VoicePool};
 use crate::EngineError;
@@ -31,7 +31,8 @@ pub struct EngineStatus {
     pub sample_rate: u32,
     pub buffer_size: Option<u32>,
     pub estimated_latency_ms: f32,
-    pub midi_device: Option<String>,
+    pub midi_devices: Vec<String>,
+    pub desired_midi_devices: Vec<String>,
     pub active_sound_id: String,
     pub master_volume: f32,
     pub is_playing: bool,
@@ -55,8 +56,9 @@ pub struct TaktEngine {
     active_bank_idx: usize,
     audio_config: AudioStreamConfig,
     audio_handle: Option<AudioStreamHandle>,
-    midi_handle: Option<MidiInputHandle>,
-    midi_tx: Option<Producer<MidiEvent>>,
+    midi_handles: Vec<MidiInputHandle>,
+    desired_midi_devices: Vec<String>,
+    midi_tx: Option<Arc<Mutex<Producer<MidiEvent>>>>,
     ctrl_tx: Producer<MidiEvent>,
     bank_tx: Producer<Arc<SampleBank>>,
     reclaim_rx: Consumer<Arc<SampleBank>>,
@@ -100,7 +102,8 @@ impl TaktEngine {
             active_bank_idx: 0,
             audio_config: AudioStreamConfig::default(),
             audio_handle: None,
-            midi_handle: None,
+            midi_handles: Vec::new(),
+            desired_midi_devices: Vec::new(),
             midi_tx: None,
             ctrl_tx,
             bank_tx,
@@ -146,37 +149,74 @@ impl TaktEngine {
         device_name: Option<String>,
         buffer_size: Option<u32>,
     ) -> Result<(), EngineError> {
-        let prev_midi = self.midi_handle.as_ref().map(|m| m.device_name.clone());
+        self.midi_handles.clear();
         self.audio_config = AudioStreamConfig {
             device_name,
             buffer_size,
         };
         self.restart_audio_stream()?;
-        if let Some(midi_name) = prev_midi {
-            let _ = self.select_midi_input(Some(midi_name));
-        }
+        self.sync_midi_connections();
         Ok(())
     }
 
-    /// Connects to a MIDI input device by name, or disconnects if `None`.
-    pub fn select_midi_input(&mut self, device_name: Option<String>) -> Result<(), EngineError> {
-        self.panic();
-        self.midi_handle = None;
+    /// Sets the list of desired MIDI input devices (supports multiple simultaneous inputs)
+    /// and connects whichever ones are currently available.
+    pub fn set_midi_devices(&mut self, devices: Vec<String>) {
+        let mut deduped = Vec::new();
+        for d in devices {
+            if !d.is_empty() && !deduped.contains(&d) {
+                deduped.push(d);
+            }
+        }
+        self.desired_midi_devices = deduped;
+        self.sync_midi_connections();
+    }
 
-        let Some(name) = device_name else {
-            return Ok(());
+    /// Reconciles active MIDI input handles against `desired_midi_devices` and currently
+    /// plugged-in ports. Unavailable devices are kept in `desired_midi_devices` and
+    /// automatically connected when they appear.
+    pub fn sync_midi_connections(&mut self) {
+        let available: Vec<String> = list_midi_devices()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+
+        let prev_len = self.midi_handles.len();
+        self.midi_handles.retain(|h| {
+            self.desired_midi_devices.contains(&h.device_name)
+                && available.contains(&h.device_name)
+        });
+        if self.midi_handles.len() < prev_len {
+            self.panic();
+        }
+
+        let Some(prod_arc) = self.midi_tx.as_ref().map(Arc::clone) else {
+            return;
         };
 
-        self.restart_audio_stream()?;
-        let mut prod = self
-            .midi_tx
-            .take()
-            .ok_or_else(|| EngineError::StreamError("MIDI producer unavailable".to_string()))?;
+        for name in &self.desired_midi_devices {
+            let already_open = self.midi_handles.iter().any(|h| &h.device_name == name);
+            if already_open || !available.contains(name) {
+                continue;
+            }
+            let prod_clone = Arc::clone(&prod_arc);
+            if let Ok(handle) = open_midi_input(name, move |event| {
+                if let Ok(mut guard) = prod_clone.lock() {
+                    let _ = guard.push(event);
+                }
+            }) {
+                self.midi_handles.push(handle);
+            }
+        }
+    }
 
-        let handle = open_midi_input(&name, move |event| {
-            let _ = prod.push(event);
-        })?;
-        self.midi_handle = Some(handle);
+    /// Connects to a single MIDI input device by name, or disconnects all if `None`.
+    pub fn select_midi_input(&mut self, device_name: Option<String>) -> Result<(), EngineError> {
+        match device_name {
+            Some(name) => self.set_midi_devices(vec![name]),
+            None => self.set_midi_devices(Vec::new()),
+        }
         Ok(())
     }
 
@@ -296,7 +336,12 @@ impl TaktEngine {
             sample_rate,
             buffer_size,
             estimated_latency_ms,
-            midi_device: self.midi_handle.as_ref().map(|m| m.device_name.clone()),
+            midi_devices: self
+                .midi_handles
+                .iter()
+                .map(|m| m.device_name.clone())
+                .collect(),
+            desired_midi_devices: self.desired_midi_devices.clone(),
             active_sound_id: self.banks[self.active_bank_idx].id.clone(),
             master_volume: f32::from_bits(self.master_volume.load(Ordering::Relaxed)),
             is_playing: self.is_playing.load(Ordering::Relaxed),
@@ -335,7 +380,7 @@ impl TaktEngine {
         let (track_tx, track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
         let (reclaim_track_tx, reclaim_track_rx) = RingBuffer::new(BANK_QUEUE_CAP);
 
-        self.midi_tx = Some(midi_tx);
+        self.midi_tx = Some(Arc::new(Mutex::new(midi_tx)));
         self.ctrl_tx = ctrl_tx;
         self.bank_tx = bank_tx;
         self.reclaim_rx = reclaim_rx;
