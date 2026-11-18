@@ -28,6 +28,16 @@ pub struct SoundParams {
     pub sample_offset_ms: f32,
     /// Velocity-to-volume dynamic range in `0.0..=1.0` (`0.88` = natural piano dynamics).
     pub vel_track: f32,
+    /// Portamento / glide time in milliseconds (`0.0..=400.0`).
+    pub glide_ms: f32,
+    /// Low-pass filter resonance in `0.0..=0.85`.
+    pub resonance: f32,
+    /// Stereo chorus wet mix in `0.0..=1.0`.
+    pub chorus_mix: f32,
+    /// Stereo auto-pan / tremolo depth in `0.0..=1.0`.
+    pub tremolo_depth: f32,
+    /// Stereo ambient delay wet mix in `0.0..=0.6`.
+    pub delay_mix: f32,
 }
 
 impl Default for SoundParams {
@@ -41,6 +51,11 @@ impl Default for SoundParams {
             hammer_hardness: 0.5,
             sample_offset_ms: 0.0,
             vel_track: 0.88,
+            glide_ms: 0.0,
+            resonance: 0.0,
+            chorus_mix: 0.0,
+            tremolo_depth: 0.0,
+            delay_mix: 0.0,
         }
     }
 }
@@ -55,6 +70,11 @@ pub struct AtomicSoundParams {
     hammer_hardness: AtomicU32,
     sample_offset_ms: AtomicU32,
     vel_track: AtomicU32,
+    glide_ms: AtomicU32,
+    resonance: AtomicU32,
+    chorus_mix: AtomicU32,
+    tremolo_depth: AtomicU32,
+    delay_mix: AtomicU32,
 }
 
 impl Default for AtomicSoundParams {
@@ -69,6 +89,11 @@ impl Default for AtomicSoundParams {
             hammer_hardness: AtomicU32::new(d.hammer_hardness.to_bits()),
             sample_offset_ms: AtomicU32::new(d.sample_offset_ms.to_bits()),
             vel_track: AtomicU32::new(d.vel_track.to_bits()),
+            glide_ms: AtomicU32::new(d.glide_ms.to_bits()),
+            resonance: AtomicU32::new(d.resonance.to_bits()),
+            chorus_mix: AtomicU32::new(d.chorus_mix.to_bits()),
+            tremolo_depth: AtomicU32::new(d.tremolo_depth.to_bits()),
+            delay_mix: AtomicU32::new(d.delay_mix.to_bits()),
         }
     }
 }
@@ -91,6 +116,16 @@ impl AtomicSoundParams {
             .store(p.sample_offset_ms.clamp(0.0, 40.0).to_bits(), Ordering::Relaxed);
         self.vel_track
             .store(p.vel_track.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.glide_ms
+            .store(p.glide_ms.clamp(0.0, 400.0).to_bits(), Ordering::Relaxed);
+        self.resonance
+            .store(p.resonance.clamp(0.0, 0.85).to_bits(), Ordering::Relaxed);
+        self.chorus_mix
+            .store(p.chorus_mix.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.tremolo_depth
+            .store(p.tremolo_depth.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.delay_mix
+            .store(p.delay_mix.clamp(0.0, 0.6).to_bits(), Ordering::Relaxed);
     }
 
     pub fn load(&self) -> SoundParams {
@@ -103,6 +138,11 @@ impl AtomicSoundParams {
             hammer_hardness: f32::from_bits(self.hammer_hardness.load(Ordering::Relaxed)),
             sample_offset_ms: f32::from_bits(self.sample_offset_ms.load(Ordering::Relaxed)),
             vel_track: f32::from_bits(self.vel_track.load(Ordering::Relaxed)),
+            glide_ms: f32::from_bits(self.glide_ms.load(Ordering::Relaxed)),
+            resonance: f32::from_bits(self.resonance.load(Ordering::Relaxed)),
+            chorus_mix: f32::from_bits(self.chorus_mix.load(Ordering::Relaxed)),
+            tremolo_depth: f32::from_bits(self.tremolo_depth.load(Ordering::Relaxed)),
+            delay_mix: f32::from_bits(self.delay_mix.load(Ordering::Relaxed)),
         }
     }
 }
@@ -215,6 +255,100 @@ impl StereoReverb {
     }
 }
 
+const CHORUS_BUF_LEN: usize = 2048;
+
+struct StereoChorus {
+    buf_l: [f32; CHORUS_BUF_LEN],
+    buf_r: [f32; CHORUS_BUF_LEN],
+    write_idx: usize,
+    lfo_phase: f32,
+}
+
+impl Default for StereoChorus {
+    fn default() -> Self {
+        Self {
+            buf_l: [0.0; CHORUS_BUF_LEN],
+            buf_r: [0.0; CHORUS_BUF_LEN],
+            write_idx: 0,
+            lfo_phase: 0.0,
+        }
+    }
+}
+
+impl StereoChorus {
+    #[inline]
+    fn read_frac(buf: &[f32; CHORUS_BUF_LEN], write_idx: usize, delay_samples: f32) -> f32 {
+        let len = CHORUS_BUF_LEN as f32;
+        let mut pos = write_idx as f32 - delay_samples;
+        if pos < 0.0 {
+            pos += len;
+        }
+        let i0 = (pos as usize) & (CHORUS_BUF_LEN - 1);
+        let i1 = (i0 + 1) & (CHORUS_BUF_LEN - 1);
+        let frac = pos - (pos as usize) as f32;
+        buf[i0] + (buf[i1] - buf[i0]) * frac
+    }
+
+    #[inline]
+    fn process(&mut self, in_l: f32, in_r: f32, sample_rate: u32) -> (f32, f32) {
+        self.buf_l[self.write_idx] = in_l;
+        self.buf_r[self.write_idx] = in_r;
+
+        let sr = sample_rate as f32;
+        let mod_s = (self.lfo_phase * TAU).sin();
+        self.lfo_phase = (self.lfo_phase + 0.55 / sr).fract();
+
+        let base_delay = 0.014 * sr;
+        let depth = 0.0045 * sr;
+        let wet_l = Self::read_frac(&self.buf_l, self.write_idx, base_delay + depth * mod_s);
+        let wet_r = Self::read_frac(&self.buf_r, self.write_idx, base_delay - depth * mod_s);
+
+        self.write_idx = (self.write_idx + 1) & (CHORUS_BUF_LEN - 1);
+        (wet_l, wet_r)
+    }
+}
+
+const DELAY_BUF_LEN: usize = 48_000;
+
+struct StereoDelay {
+    buf_l: Vec<f32>,
+    buf_r: Vec<f32>,
+    idx: usize,
+    damp_l: f32,
+    damp_r: f32,
+}
+
+impl Default for StereoDelay {
+    fn default() -> Self {
+        Self {
+            buf_l: vec![0.0; DELAY_BUF_LEN],
+            buf_r: vec![0.0; DELAY_BUF_LEN],
+            idx: 0,
+            damp_l: 0.0,
+            damp_r: 0.0,
+        }
+    }
+}
+
+impl StereoDelay {
+    #[inline]
+    fn process(&mut self, in_l: f32, in_r: f32, sample_rate: u32) -> (f32, f32) {
+        let delay_samples = ((0.36 * sample_rate as f32) as usize).clamp(1, DELAY_BUF_LEN - 1);
+        let read_idx = (self.idx + DELAY_BUF_LEN - delay_samples) % DELAY_BUF_LEN;
+        let tap_l = self.buf_l[read_idx];
+        let tap_r = self.buf_r[read_idx];
+
+        self.damp_l = tap_l * 0.65 + self.damp_l * 0.35;
+        self.damp_r = tap_r * 0.65 + self.damp_r * 0.35;
+
+        // Ping-pong cross-feedback
+        self.buf_l[self.idx] = in_l + self.damp_r * 0.38;
+        self.buf_r[self.idx] = in_r + self.damp_l * 0.38;
+        self.idx = (self.idx + 1) % DELAY_BUF_LEN;
+        (tap_l, tap_r)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceState {
     Idle,
@@ -228,6 +362,7 @@ pub struct Voice {
     pub state: VoiceState,
     pub channel: u8,
     pub note: u8,
+    pub current_note: f32,
     pub zone_idx: usize,
     pub position: f64,
     pub velocity_gain: f32,
@@ -244,6 +379,7 @@ impl Default for Voice {
             state: VoiceState::Idle,
             channel: 0,
             note: 0,
+            current_note: 0.0,
             zone_idx: 0,
             position: 0.0,
             velocity_gain: 0.0,
@@ -263,12 +399,18 @@ pub struct VoicePool {
     pitch_bend_semitones: f32,
     mod_wheel: f32,
     lfo_phase: f32,
+    tremolo_phase: f32,
+    last_note: Option<f32>,
     age_counter: u64,
-    lp_l: f32,
-    lp_r: f32,
+    svf_low_l: f32,
+    svf_band_l: f32,
+    svf_low_r: f32,
+    svf_band_r: f32,
     bark_lp_l: f32,
     bark_lp_r: f32,
     reverb: Box<StereoReverb>,
+    chorus: Box<StereoChorus>,
+    delay: Box<StereoDelay>,
 }
 
 impl Default for VoicePool {
@@ -279,12 +421,18 @@ impl Default for VoicePool {
             pitch_bend_semitones: 0.0,
             mod_wheel: 0.0,
             lfo_phase: 0.0,
+            tremolo_phase: 0.0,
+            last_note: None,
             age_counter: 0,
-            lp_l: 0.0,
-            lp_r: 0.0,
+            svf_low_l: 0.0,
+            svf_band_l: 0.0,
+            svf_low_r: 0.0,
+            svf_band_r: 0.0,
             bark_lp_l: 0.0,
             bark_lp_r: 0.0,
             reverb: Box::default(),
+            chorus: Box::default(),
+            delay: Box::default(),
         }
     }
 }
@@ -351,10 +499,18 @@ impl VoicePool {
                     (0.0, release_step_for_ms(total_attack_ms, sample_rate))
                 };
 
+                let start_note = if params.glide_ms > 1.0 {
+                    self.last_note.unwrap_or(note as f32)
+                } else {
+                    note as f32
+                };
+                self.last_note = Some(note as f32);
+
                 self.voices[slot] = Voice {
                     state: VoiceState::Playing,
                     channel,
                     note,
+                    current_note: start_note,
                     zone_idx,
                     position,
                     velocity_gain,
@@ -474,21 +630,26 @@ impl VoicePool {
 
         let mut any_active = false;
         let lfo_inc = VIBRATO_RATE_HZ / sample_rate as f32;
+        let trem_inc = 4.4 / sample_rate as f32;
+        let glide_coeff = if params.glide_ms > 1.0 {
+            1.0 - (-1.0 / (params.glide_ms * 0.001 * sample_rate as f32)).exp()
+        } else {
+            1.0
+        };
         let hammer_bright = if params.hammer_hardness < 0.5 {
             0.35 + 1.3 * params.hammer_hardness
         } else {
             1.0
         };
         let eff_brightness = (params.brightness * hammer_bright).clamp(0.0, 1.0);
-        let use_lp = eff_brightness < 0.995;
-        let lp_alpha = if use_lp {
-            let cutoff = 600.0 * (30.0_f32).powf(eff_brightness);
-            let dt = 1.0 / sample_rate as f32;
-            let rc = 1.0 / (TAU * cutoff);
-            (dt / (rc + dt)).clamp(0.01, 1.0)
+        let use_svf = eff_brightness < 0.995 || params.resonance > 0.01;
+        let svf_f = if use_svf {
+            let cutoff = (600.0 * (30.0_f32).powf(eff_brightness)).min(sample_rate as f32 * 0.42);
+            (2.0 * (std::f32::consts::PI * cutoff / sample_rate as f32).sin()).clamp(0.01, 0.85)
         } else {
-            1.0
+            0.85
         };
+        let svf_q = (1.0 - params.resonance.clamp(0.0, 0.85) * 0.88).clamp(0.12, 1.0);
         let use_bark = params.hammer_hardness > 0.51;
         let bark_amount = ((params.hammer_hardness - 0.5) * 2.0).clamp(0.0, 1.0);
         let bark_alpha = if use_bark {
@@ -498,6 +659,9 @@ impl VoicePool {
         } else {
             1.0
         };
+        let use_chorus = params.chorus_mix > 0.005;
+        let use_tremolo = params.tremolo_depth > 0.005;
+        let use_delay = params.delay_mix > 0.005;
         let use_reverb = params.reverb_mix > 0.001;
 
         for frame_idx in 0..num_frames {
@@ -555,8 +719,14 @@ impl VoicePool {
                     v.attack_gain = (v.attack_gain + v.attack_step).min(1.0);
                 }
 
+                if (v.note as f32 - v.current_note).abs() > 0.001 {
+                    v.current_note += (v.note as f32 - v.current_note) * glide_coeff;
+                } else {
+                    v.current_note = v.note as f32;
+                }
+
                 let semitones =
-                    (v.note as f32 - zone.root_note as f32) + self.pitch_bend_semitones + vibrato;
+                    (v.current_note - zone.root_note as f32) + self.pitch_bend_semitones + vibrato;
                 let pitch_ratio = 2.0_f64.powf(semitones as f64 / 12.0);
                 let rate_ratio = zone.sample.sample_rate as f64 / sample_rate as f64;
                 v.position += pitch_ratio * rate_ratio;
@@ -595,11 +765,31 @@ impl VoicePool {
                     + (mix_r * drive).tanh() * (0.16 * bark_amount);
             }
 
-            if use_lp {
-                self.lp_l += lp_alpha * (mix_l - self.lp_l);
-                self.lp_r += lp_alpha * (mix_r - self.lp_r);
-                mix_l = self.lp_l;
-                mix_r = self.lp_r;
+            if use_svf {
+                let hp_l = mix_l - self.svf_low_l - svf_q * self.svf_band_l;
+                self.svf_band_l += svf_f * hp_l;
+                self.svf_low_l += svf_f * self.svf_band_l;
+                mix_l = self.svf_low_l;
+
+                let hp_r = mix_r - self.svf_low_r - svf_q * self.svf_band_r;
+                self.svf_band_r += svf_f * hp_r;
+                self.svf_low_r += svf_f * self.svf_band_r;
+                mix_r = self.svf_low_r;
+            }
+
+            if use_tremolo {
+                let mod_t = (self.tremolo_phase * TAU).sin();
+                let depth = params.tremolo_depth;
+                mix_l *= 1.0 - depth * (0.5 + 0.5 * mod_t);
+                mix_r *= 1.0 - depth * (0.5 - 0.5 * mod_t);
+            }
+            self.tremolo_phase = (self.tremolo_phase + trem_inc).fract();
+
+            if use_chorus {
+                let (ch_l, ch_r) = self.chorus.process(mix_l, mix_r, sample_rate);
+                let cm = params.chorus_mix;
+                mix_l = mix_l * (1.0 - cm * 0.4) + ch_l * cm * 0.65;
+                mix_r = mix_r * (1.0 - cm * 0.4) + ch_r * cm * 0.65;
             }
 
             if (params.stereo_width - 1.0).abs() > 0.01 {
@@ -607,6 +797,12 @@ impl VoicePool {
                 let side = 0.5 * (mix_l - mix_r) * params.stereo_width;
                 mix_l = mid + side;
                 mix_r = mid - side;
+            }
+
+            if use_delay {
+                let (dl_l, dl_r) = self.delay.process(mix_l, mix_r, sample_rate);
+                mix_l += dl_l * params.delay_mix;
+                mix_r += dl_r * params.delay_mix;
             }
 
             if use_reverb {
@@ -796,6 +992,40 @@ mod tests {
             hard_params,
         );
         assert_eq!(pool.voices[0].zone_idx, 1);
+    }
+
+    #[test]
+    fn glide_slews_pitch_smoothly_toward_target_note() {
+        let bank = &load_built_in_banks(None)[0];
+        let mut pool = VoicePool::default();
+        let params = SoundParams {
+            glide_ms: 100.0,
+            ..SoundParams::default()
+        };
+        pool.handle_event_with_params(
+            MidiEvent::NoteOn {
+                channel: 0,
+                note: 60,
+                velocity: 100,
+            },
+            bank,
+            44_100,
+            params,
+        );
+        pool.handle_event_with_params(
+            MidiEvent::NoteOn {
+                channel: 0,
+                note: 72,
+                velocity: 100,
+            },
+            bank,
+            44_100,
+            params,
+        );
+        assert!((pool.voices[1].current_note - 60.0).abs() < 0.01);
+        let mut buf = vec![0.0_f32; 512 * 2];
+        pool.render_with_params(&mut buf, 2, 44_100, 1.0, bank, params);
+        assert!(pool.voices[1].current_note > 60.5 && pool.voices[1].current_note < 72.0);
     }
 }
 

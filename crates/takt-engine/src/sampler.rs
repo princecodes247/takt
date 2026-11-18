@@ -310,11 +310,31 @@ fn infer_voice_category(id: &str) -> String {
 }
 
 fn supported_params_for(id: &str, category: &str) -> Vec<&'static str> {
+    let is_epiano = matches!(category, "Electric Pianos")
+        || id.contains("epiano")
+        || id.contains("rhodes")
+        || id.contains("wurlitzer");
+
+    if is_epiano {
+        return vec![
+            "hammer",
+            "brightness",
+            "tremolo",
+            "chorus",
+            "delay",
+            "attack",
+            "release",
+            "offset",
+            "veltrack",
+            "reverb",
+            "width",
+        ];
+    }
+
     let is_hammered = matches!(
         category,
-        "Model D" | "Acoustic Pianos" | "Electric Pianos" | "GS · Piano" | "GS · Chromatic"
+        "Model D" | "Acoustic Pianos" | "GS · Piano" | "GS · Chromatic"
     ) || id.contains("piano")
-        || id.contains("epiano")
         || id.contains("harpsichord")
         || id.contains("clav");
 
@@ -331,17 +351,46 @@ fn supported_params_for(id: &str, category: &str) -> Vec<&'static str> {
         ];
     }
 
+    if matches!(
+        category,
+        "Synth & Pads" | "GS · Synth Lead" | "GS · Synth Pad" | "GS · Bass"
+    ) {
+        return vec![
+            "glide",
+            "brightness",
+            "resonance",
+            "chorus",
+            "delay",
+            "tremolo",
+            "attack",
+            "release",
+            "veltrack",
+            "reverb",
+            "width",
+        ];
+    }
+
     if category == "GS · Organ" {
-        return vec!["brightness", "attack", "release", "reverb", "width"];
+        return vec![
+            "brightness",
+            "chorus",
+            "tremolo",
+            "attack",
+            "release",
+            "reverb",
+            "width",
+        ];
     }
 
     if category == "GS · Drums" {
         return vec!["brightness", "release", "veltrack", "reverb", "width"];
     }
 
-    // Plucked, strings, brass, winds, synths, pads
+    // Plucked, strings, brass, winds, ethnic, FX
     vec![
         "brightness",
+        "chorus",
+        "delay",
         "attack",
         "release",
         "veltrack",

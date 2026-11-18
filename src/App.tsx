@@ -49,6 +49,11 @@ interface SoundParamsDto {
   hammerHardness: number;
   sampleOffsetMs: number;
   velTrack: number;
+  glideMs: number;
+  resonance: number;
+  chorusMix: number;
+  tremoloDepth: number;
+  delayMix: number;
 }
 
 const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
@@ -60,6 +65,11 @@ const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
   hammerHardness: 0.5,
   sampleOffsetMs: 0.0,
   velTrack: 0.88,
+  glideMs: 0.0,
+  resonance: 0.0,
+  chorusMix: 0.0,
+  tremoloDepth: 0.0,
+  delayMix: 0.0,
 };
 
 interface InitialStateDto {
@@ -816,6 +826,25 @@ export default function App() {
         </div>
 
         <div className="params-strip" aria-label="Voice Shaping">
+          {supportedParams.has("glide") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Glide</span>
+                <span>{Math.round(status?.soundParams.glideMs ?? 0)} ms</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={400}
+                step={5}
+                value={Math.round(status?.soundParams.glideMs ?? 0)}
+                onChange={(e) =>
+                  handleSoundParamChange({ glideMs: Number(e.target.value) })
+                }
+              />
+            </div>
+          )}
+
           {supportedParams.has("hammer") && (
             <div className="param-item">
               <div className="param-head">
@@ -856,6 +885,94 @@ export default function App() {
                 onChange={(e) =>
                   handleSoundParamChange({
                     brightness: Number(e.target.value) / 100,
+                  })
+                }
+              />
+            </div>
+          )}
+
+          {supportedParams.has("resonance") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Resonance</span>
+                <span>
+                  {Math.round((status?.soundParams.resonance ?? 0) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={85}
+                value={Math.round((status?.soundParams.resonance ?? 0) * 100)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    resonance: Number(e.target.value) / 100,
+                  })
+                }
+              />
+            </div>
+          )}
+
+          {supportedParams.has("chorus") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Chorus</span>
+                <span>
+                  {Math.round((status?.soundParams.chorusMix ?? 0) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round((status?.soundParams.chorusMix ?? 0) * 100)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    chorusMix: Number(e.target.value) / 100,
+                  })
+                }
+              />
+            </div>
+          )}
+
+          {supportedParams.has("tremolo") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Tremolo</span>
+                <span>
+                  {Math.round((status?.soundParams.tremoloDepth ?? 0) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round((status?.soundParams.tremoloDepth ?? 0) * 100)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    tremoloDepth: Number(e.target.value) / 100,
+                  })
+                }
+              />
+            </div>
+          )}
+
+          {supportedParams.has("delay") && (
+            <div className="param-item">
+              <div className="param-head">
+                <span>Delay</span>
+                <span>
+                  {Math.round((status?.soundParams.delayMix ?? 0) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={60}
+                value={Math.round((status?.soundParams.delayMix ?? 0) * 100)}
+                onChange={(e) =>
+                  handleSoundParamChange({
+                    delayMix: Number(e.target.value) / 100,
                   })
                 }
               />

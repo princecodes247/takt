@@ -64,6 +64,11 @@ struct SoundParamsDto {
     hammer_hardness: f32,
     sample_offset_ms: f32,
     vel_track: f32,
+    glide_ms: f32,
+    resonance: f32,
+    chorus_mix: f32,
+    tremolo_depth: f32,
+    delay_mix: f32,
 }
 
 impl From<SoundParams> for SoundParamsDto {
@@ -77,6 +82,11 @@ impl From<SoundParams> for SoundParamsDto {
             hammer_hardness: p.hammer_hardness,
             sample_offset_ms: p.sample_offset_ms,
             vel_track: p.vel_track,
+            glide_ms: p.glide_ms,
+            resonance: p.resonance,
+            chorus_mix: p.chorus_mix,
+            tremolo_depth: p.tremolo_depth,
+            delay_mix: p.delay_mix,
         }
     }
 }
@@ -92,6 +102,11 @@ impl From<SoundParamsDto> for SoundParams {
             hammer_hardness: p.hammer_hardness,
             sample_offset_ms: p.sample_offset_ms,
             vel_track: p.vel_track,
+            glide_ms: p.glide_ms,
+            resonance: p.resonance,
+            chorus_mix: p.chorus_mix,
+            tremolo_depth: p.tremolo_depth,
+            delay_mix: p.delay_mix,
         }
     }
 }
