@@ -829,6 +829,48 @@ export default function App() {
   }, [handleUpdateLayer]);
 
   useEffect(() => {
+    invoke<InitialStateDto>("get_initial_state")
+      .then((data) => {
+        setMidiDevices(data.midiDevices);
+        setAudioDevices(data.audioDevices);
+        setSounds(data.sounds);
+        setStatus(data.status);
+      })
+      .catch((err) => setError(String(err)));
+
+    const unlistenTelemetry = listen<TelemetryDto>(
+      "takt://telemetry",
+      (event) => {
+        setStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                isPlaying: event.payload.isPlaying,
+                activeVoices: event.payload.activeVoices,
+                estimatedLatencyMs: event.payload.estimatedLatencyMs,
+                midiDevices: event.payload.midiDevices,
+                desiredMidiDevices: event.payload.desiredMidiDevices,
+                backingTrackPlaying: event.payload.backingTrackPlaying,
+                backingTrackPositionMs: event.payload.backingTrackPositionMs,
+                backingTrackDurationMs: event.payload.backingTrackDurationMs,
+              }
+            : prev
+        );
+        setActiveMidiNotes(new Set(event.payload.activeMidiNotes));
+      }
+    );
+
+    const unlistenMidi = listen<string[]>("takt://midi-devices", (event) => {
+      setMidiDevices(event.payload);
+    });
+
+    return () => {
+      unlistenTelemetry.then((fn) => fn());
+      unlistenMidi.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
     const unlistenPc = listen<number>("takt://program-change", (event) => {
       const targetPatch = patches[event.payload];
       if (targetPatch) {
