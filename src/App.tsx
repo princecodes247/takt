@@ -123,6 +123,8 @@ const WORSHIP_KEYS = [
   "B",
 ];
 
+const OCTAVE_C_NOTES = [24, 36, 48, 60, 72, 84, 96, 108];
+
 const LAYER_COLORS = ["#f59e0b", "#22c55e", "#3b82f6", "#a855f7"];
 
 const NOTE_NAMES = [
@@ -323,6 +325,7 @@ export default function App() {
   const [loadingTarget, setLoadingTarget] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupOpen, setSetupOpen] = useState<boolean>(false);
+  const [zonesView, setZonesView] = useState<boolean>(false);
   const [showAllMidiPorts, setShowAllMidiPorts] = useState<boolean>(false);
   const [leftTab, setLeftTab] = useState<"pad" | "track">("pad");
   // Voice picker modal: null = closed, number = replace layer index, "add" = add new layer
@@ -369,6 +372,14 @@ export default function App() {
   const mousePressedRef = useRef<boolean>(false);
   const activeMouseNoteRef = useRef<number | null>(null);
   const trackInputRef = useRef<HTMLInputElement | null>(null);
+  const zoneDragRef = useRef<{
+    layerIdx: number;
+    mode: "min" | "max" | "move";
+    startX: number;
+    origMin: number;
+    origMax: number;
+    trackWidth: number;
+  } | null>(null);
 
   const layers = status?.layers ?? [];
 
@@ -427,40 +438,87 @@ export default function App() {
     }
   };
 
-  const handleUpdateLayer = async (
-    index: number,
-    patch: Partial<LayerDto> & { paramsPatch?: Partial<SoundParamsDto> }
-  ) => {
-    const layer = status?.layers[index];
-    if (!layer) return;
-    const nextLayer: LayerDto = {
-      ...layer,
-      ...patch,
-      params: patch.paramsPatch
-        ? { ...layer.params, ...patch.paramsPatch }
-        : patch.params ?? layer.params,
-    };
-    setStatus((prev) => {
-      if (!prev) return prev;
-      const nextLayers = prev.layers.map((l, i) =>
-        i === index ? nextLayer : l
-      );
-      return { ...prev, layers: nextLayers };
-    });
-    try {
-      await invoke("update_layer", {
-        index,
-        enabled: nextLayer.enabled,
-        volume: nextLayer.volume,
-        minNote: nextLayer.minNote,
-        maxNote: nextLayer.maxNote,
-        octaveShift: nextLayer.octaveShift,
-        params: nextLayer.params,
+  const handleUpdateLayer = useCallback(
+    async (
+      index: number,
+      patch: Partial<LayerDto> & { paramsPatch?: Partial<SoundParamsDto> }
+    ) => {
+      const layer = status?.layers[index];
+      if (!layer) return;
+      const nextLayer: LayerDto = {
+        ...layer,
+        ...patch,
+        params: patch.paramsPatch
+          ? { ...layer.params, ...patch.paramsPatch }
+          : patch.params ?? layer.params,
+      };
+      setStatus((prev) => {
+        if (!prev) return prev;
+        const nextLayers = prev.layers.map((l, i) =>
+          i === index ? nextLayer : l
+        );
+        return { ...prev, layers: nextLayers };
       });
-    } catch (err) {
-      setError(String(err));
-    }
-  };
+      try {
+        await invoke("update_layer", {
+          index,
+          enabled: nextLayer.enabled,
+          volume: nextLayer.volume,
+          minNote: nextLayer.minNote,
+          maxNote: nextLayer.maxNote,
+          octaveShift: nextLayer.octaveShift,
+          params: nextLayer.params,
+        });
+      } catch (err) {
+        setError(String(err));
+      }
+    },
+    [status?.layers]
+  );
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const drag = zoneDragRef.current;
+      if (!drag || drag.trackWidth <= 0) return;
+      const deltaNotes = Math.round(
+        ((e.clientX - drag.startX) / drag.trackWidth) * 87
+      );
+      if (drag.mode === "min") {
+        const nextMin = Math.max(
+          21,
+          Math.min(drag.origMax, drag.origMin + deltaNotes)
+        );
+        handleUpdateLayer(drag.layerIdx, { minNote: nextMin });
+      } else if (drag.mode === "max") {
+        const nextMax = Math.min(
+          108,
+          Math.max(drag.origMin, drag.origMax + deltaNotes)
+        );
+        handleUpdateLayer(drag.layerIdx, { maxNote: nextMax });
+      } else {
+        const span = drag.origMax - drag.origMin;
+        const nextMin = Math.max(
+          21,
+          Math.min(108 - span, drag.origMin + deltaNotes)
+        );
+        handleUpdateLayer(drag.layerIdx, {
+          minNote: nextMin,
+          maxNote: nextMin + span,
+        });
+      }
+    };
+    const onUp = () => {
+      zoneDragRef.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [handleUpdateLayer]);
 
   useEffect(() => {
     try {
@@ -950,6 +1008,29 @@ export default function App() {
             <span className="master-pct">{volumePct}%</span>
           </div>
 
+          <div className="view-switch" role="group" aria-label="Stage View">
+            <button
+              type="button"
+              className={`view-btn ${!setupOpen && !zonesView ? "active" : ""}`}
+              onClick={() => {
+                setSetupOpen(false);
+                setZonesView(false);
+              }}
+            >
+              Stage
+            </button>
+            <button
+              type="button"
+              className={`view-btn ${!setupOpen && zonesView ? "active" : ""}`}
+              onClick={() => {
+                setSetupOpen(false);
+                setZonesView(true);
+              }}
+            >
+              Ranges
+            </button>
+          </div>
+
           <button
             type="button"
             className={`btn-setup ${setupOpen ? "active" : ""}`}
@@ -1116,6 +1197,198 @@ export default function App() {
                 Test C4 Note
               </button>
             </div>
+          </div>
+        </section>
+      ) : zonesView ? (
+        <section className="zones-editor" aria-label="Layer Ranges & Alignments">
+          <div className="zones-toolbar">
+            <div className="sound-title-row">
+              <label>Layer Ranges & Alignments</label>
+              <span className="keyboard-hint">
+                Drag handles to set range · Drag bar to shift · Double-click bar for Full 88
+              </span>
+            </div>
+            <div className="zones-actions">
+              <button
+                type="button"
+                className="btn-mini"
+                onClick={() => {
+                  layers.forEach((_, i) =>
+                    handleUpdateLayer(i, { minNote: 21, maxNote: 108 })
+                  );
+                }}
+              >
+                All Full 88
+              </button>
+              {layers.length >= 2 && (
+                <button
+                  type="button"
+                  className="btn-mini"
+                  onClick={() => {
+                    handleUpdateLayer(0, { minNote: 21, maxNote: 59 });
+                    for (let i = 1; i < layers.length; i++) {
+                      handleUpdateLayer(i, { minNote: 60, maxNote: 108 });
+                    }
+                  }}
+                >
+                  Split @ C4
+                </button>
+              )}
+              {layers.length < 4 && (
+                <button
+                  type="button"
+                  className="btn-mini active"
+                  onClick={() => setPickerTarget("add")}
+                >
+                  + Add Layer
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="zones-rows">
+            {[0, 1, 2, 3].map((slotIdx) => {
+              const layer = layers[slotIdx];
+              const color = LAYER_COLORS[slotIdx % LAYER_COLORS.length];
+              if (!layer) {
+                return (
+                  <div key={`empty-${slotIdx}`} className="zone-editor-row empty">
+                    <div className="zone-gutter">
+                      <span
+                        className="zone-gutter-dot"
+                        style={{ background: color, opacity: 0.35 }}
+                      />
+                      <span className="zone-gutter-idx">L{slotIdx + 1}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="zone-empty-track"
+                      onClick={() => setPickerTarget("add")}
+                    >
+                      Empty Sound Layer {slotIdx + 1} — Click to Add Sound
+                    </button>
+                  </div>
+                );
+              }
+
+              const leftPct = ((layer.minNote - 21) / 87) * 100;
+              const widthPct = Math.max(
+                4,
+                ((layer.maxNote - layer.minNote) / 87) * 100
+              );
+
+              return (
+                <div key={`ze-${slotIdx}`} className="zone-editor-row">
+                  <div className="zone-gutter">
+                    <button
+                      type="button"
+                      className={`zone-mute-btn ${layer.enabled ? "on" : ""}`}
+                      style={{ "--layer-color": color } as React.CSSProperties}
+                      onClick={() =>
+                        handleUpdateLayer(slotIdx, { enabled: !layer.enabled })
+                      }
+                      title={layer.enabled ? "Mute layer" : "Enable layer"}
+                    >
+                      L{slotIdx + 1}
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setEditingLayerIdx(slotIdx)}
+                      title="Layer Controls"
+                    >
+                      ≡
+                    </button>
+                  </div>
+
+                  <div className="zone-lane">
+                    {/* Vertical Octave Gridlines aligned to 88-key piano */}
+                    {OCTAVE_C_NOTES.map((cNote) => (
+                      <div
+                        key={cNote}
+                        className="zone-gridline"
+                        style={{ left: `${((cNote - 21) / 87) * 100}%` }}
+                      />
+                    ))}
+
+                    <div
+                      className={`zone-bar ${layer.enabled ? "" : "muted"}`}
+                      style={{
+                        left: `${leftPct}%`,
+                        width: `${widthPct}%`,
+                        background: color,
+                      }}
+                      onPointerDown={(e) => {
+                        const parent = e.currentTarget.parentElement;
+                        if (!parent) return;
+                        e.preventDefault();
+                        zoneDragRef.current = {
+                          layerIdx: slotIdx,
+                          mode: "move",
+                          startX: e.clientX,
+                          origMin: layer.minNote,
+                          origMax: layer.maxNote,
+                          trackWidth: parent.getBoundingClientRect().width,
+                        };
+                      }}
+                      onDoubleClick={() =>
+                        handleUpdateLayer(slotIdx, { minNote: 21, maxNote: 108 })
+                      }
+                    >
+                      <button
+                        type="button"
+                        className="zone-handle left"
+                        aria-label={`Low key ${midiNoteLabel(layer.minNote)}`}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          const lane =
+                            e.currentTarget.parentElement?.parentElement;
+                          if (!lane) return;
+                          zoneDragRef.current = {
+                            layerIdx: slotIdx,
+                            mode: "min",
+                            startX: e.clientX,
+                            origMin: layer.minNote,
+                            origMax: layer.maxNote,
+                            trackWidth: lane.getBoundingClientRect().width,
+                          };
+                        }}
+                      />
+
+                      <span className="zone-note-pill">
+                        {midiNoteLabel(layer.minNote)}
+                      </span>
+                      <span className="zone-bar-name">{layer.soundName}</span>
+                      <span className="zone-note-pill">
+                        {midiNoteLabel(layer.maxNote)}
+                      </span>
+
+                      <button
+                        type="button"
+                        className="zone-handle right"
+                        aria-label={`High key ${midiNoteLabel(layer.maxNote)}`}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          const lane =
+                            e.currentTarget.parentElement?.parentElement;
+                          if (!lane) return;
+                          zoneDragRef.current = {
+                            layerIdx: slotIdx,
+                            mode: "max",
+                            startX: e.clientX,
+                            origMin: layer.minNote,
+                            origMax: layer.maxNote,
+                            trackWidth: lane.getBoundingClientRect().width,
+                          };
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       ) : (
