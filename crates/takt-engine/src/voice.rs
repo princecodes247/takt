@@ -1,5 +1,5 @@
 use std::f32::consts::TAU;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 use crate::midi::MidiEvent;
 use crate::sampler::SampleBank;
@@ -8,6 +8,25 @@ pub const MAX_VOICES: usize = 32;
 const PITCH_BEND_SEMITONES: f32 = 2.0;
 const VIBRATO_RATE_HZ: f32 = 5.5;
 const MAX_VIBRATO_SEMITONES: f32 = 0.35;
+
+/// Polyphony / playing mode for `VoicePool`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum VoiceMode {
+    Poly = 0,
+    Mono = 1,
+    Legato = 2,
+}
+
+impl VoiceMode {
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Mono,
+            2 => Self::Legato,
+            _ => Self::Poly,
+        }
+    }
+}
 
 /// Real-time adjustable voice-shaping parameters.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,6 +57,8 @@ pub struct SoundParams {
     pub tremolo_depth: f32,
     /// Stereo ambient delay wet mix in `0.0..=0.6`.
     pub delay_mix: f32,
+    /// Poly / Mono / Legato voice mode.
+    pub voice_mode: VoiceMode,
 }
 
 impl Default for SoundParams {
@@ -56,6 +77,7 @@ impl Default for SoundParams {
             chorus_mix: 0.0,
             tremolo_depth: 0.0,
             delay_mix: 0.0,
+            voice_mode: VoiceMode::Poly,
         }
     }
 }
@@ -75,6 +97,7 @@ pub struct AtomicSoundParams {
     chorus_mix: AtomicU32,
     tremolo_depth: AtomicU32,
     delay_mix: AtomicU32,
+    voice_mode: AtomicU8,
 }
 
 impl Default for AtomicSoundParams {
@@ -94,6 +117,7 @@ impl Default for AtomicSoundParams {
             chorus_mix: AtomicU32::new(d.chorus_mix.to_bits()),
             tremolo_depth: AtomicU32::new(d.tremolo_depth.to_bits()),
             delay_mix: AtomicU32::new(d.delay_mix.to_bits()),
+            voice_mode: AtomicU8::new(d.voice_mode as u8),
         }
     }
 }
@@ -126,6 +150,8 @@ impl AtomicSoundParams {
             .store(p.tremolo_depth.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         self.delay_mix
             .store(p.delay_mix.clamp(0.0, 0.6).to_bits(), Ordering::Relaxed);
+        self.voice_mode
+            .store(p.voice_mode as u8, Ordering::Relaxed);
     }
 
     pub fn load(&self) -> SoundParams {
@@ -143,6 +169,7 @@ impl AtomicSoundParams {
             chorus_mix: f32::from_bits(self.chorus_mix.load(Ordering::Relaxed)),
             tremolo_depth: f32::from_bits(self.tremolo_depth.load(Ordering::Relaxed)),
             delay_mix: f32::from_bits(self.delay_mix.load(Ordering::Relaxed)),
+            voice_mode: VoiceMode::from_u8(self.voice_mode.load(Ordering::Relaxed)),
         }
     }
 }
@@ -401,6 +428,8 @@ pub struct VoicePool {
     lfo_phase: f32,
     tremolo_phase: f32,
     last_note: Option<f32>,
+    mono_stack: [(u8, u8, u8); 16],
+    mono_stack_len: usize,
     age_counter: u64,
     svf_low_l: f32,
     svf_band_l: f32,
@@ -423,6 +452,8 @@ impl Default for VoicePool {
             lfo_phase: 0.0,
             tremolo_phase: 0.0,
             last_note: None,
+            mono_stack: [(0, 0, 0); 16],
+            mono_stack_len: 0,
             age_counter: 0,
             svf_low_l: 0.0,
             svf_band_l: 0.0,
@@ -467,11 +498,37 @@ impl VoicePool {
                 let Some(zone_idx) = bank.find_zone_index(note, effective_vel) else {
                     return;
                 };
-                // Re-trigger same note cleanly if already sounding on this channel.
-                for v in &mut self.voices {
-                    if v.state != VoiceState::Idle && v.channel == channel && v.note == note {
-                        v.state = VoiceState::Releasing;
-                        v.release_step = release_step_for_ms(5.0, sample_rate);
+
+                if params.voice_mode != VoiceMode::Poly {
+                    self.push_mono_note(channel, note, velocity);
+                    if params.voice_mode == VoiceMode::Legato {
+                        if let Some(v) = self
+                            .voices
+                            .iter_mut()
+                            .find(|v| v.state == VoiceState::Playing || v.state == VoiceState::Sustained)
+                        {
+                            v.state = VoiceState::Playing;
+                            v.channel = channel;
+                            v.note = note;
+                            self.last_note = Some(note as f32);
+                            return;
+                        }
+                    }
+                    // Mono retrigger (or first note of Legato): quickly release any existing voices
+                    let fast_step = release_step_for_ms(5.0, sample_rate);
+                    for v in &mut self.voices {
+                        if v.state != VoiceState::Idle {
+                            v.state = VoiceState::Releasing;
+                            v.release_step = fast_step;
+                        }
+                    }
+                } else {
+                    // Re-trigger same note cleanly if already sounding on this channel.
+                    for v in &mut self.voices {
+                        if v.state != VoiceState::Idle && v.channel == channel && v.note == note {
+                            v.state = VoiceState::Releasing;
+                            v.release_step = release_step_for_ms(5.0, sample_rate);
+                        }
                     }
                 }
 
@@ -522,6 +579,50 @@ impl VoicePool {
                 };
             }
             MidiEvent::NoteOff { channel, note } => {
+                if params.voice_mode != VoiceMode::Poly {
+                    let was_top = self.mono_stack_len > 0
+                        && self.mono_stack[self.mono_stack_len - 1].0 == channel
+                        && self.mono_stack[self.mono_stack_len - 1].1 == note;
+                    self.remove_mono_note(channel, note);
+                    if was_top && self.mono_stack_len > 0 {
+                        let (prev_ch, prev_note, prev_vel) =
+                            self.mono_stack[self.mono_stack_len - 1];
+                        if params.voice_mode == VoiceMode::Legato {
+                            if let Some(v) = self
+                                .voices
+                                .iter_mut()
+                                .find(|v| v.state == VoiceState::Playing)
+                            {
+                                v.channel = prev_ch;
+                                v.note = prev_note;
+                                self.last_note = Some(prev_note as f32);
+                                return;
+                            }
+                        } else {
+                            // Mono mode: retrigger previous held note
+                            let mut next_params = params;
+                            next_params.voice_mode = VoiceMode::Poly;
+                            let fast_step = release_step_for_ms(5.0, sample_rate);
+                            for v in &mut self.voices {
+                                if v.state != VoiceState::Idle {
+                                    v.state = VoiceState::Releasing;
+                                    v.release_step = fast_step;
+                                }
+                            }
+                            self.handle_event_with_params(
+                                MidiEvent::NoteOn {
+                                    channel: prev_ch,
+                                    note: prev_note,
+                                    velocity: prev_vel,
+                                },
+                                bank,
+                                sample_rate,
+                                next_params,
+                            );
+                            return;
+                        }
+                    }
+                }
                 for v in &mut self.voices {
                     if v.state == VoiceState::Playing && v.channel == channel && v.note == note {
                         if self.sustain_pressed {
@@ -553,6 +654,7 @@ impl VoicePool {
             }
             MidiEvent::AllNotesOff => {
                 self.sustain_pressed = false;
+                self.mono_stack_len = 0;
                 let fast_step = release_step_for_ms(5.0, sample_rate);
                 for v in &mut self.voices {
                     if v.state != VoiceState::Idle {
@@ -561,6 +663,26 @@ impl VoicePool {
                     }
                 }
             }
+        }
+    }
+
+    fn push_mono_note(&mut self, channel: u8, note: u8, velocity: u8) {
+        self.remove_mono_note(channel, note);
+        if self.mono_stack_len >= self.mono_stack.len() {
+            self.mono_stack.copy_within(1.., 0);
+            self.mono_stack_len -= 1;
+        }
+        self.mono_stack[self.mono_stack_len] = (channel, note, velocity);
+        self.mono_stack_len += 1;
+    }
+
+    fn remove_mono_note(&mut self, channel: u8, note: u8) {
+        if let Some(pos) = self.mono_stack[..self.mono_stack_len]
+            .iter()
+            .position(|&(ch, n, _)| ch == channel && n == note)
+        {
+            self.mono_stack.copy_within(pos + 1..self.mono_stack_len, pos);
+            self.mono_stack_len -= 1;
         }
     }
 
@@ -1026,6 +1148,44 @@ mod tests {
         let mut buf = vec![0.0_f32; 512 * 2];
         pool.render_with_params(&mut buf, 2, 44_100, 1.0, bank, params);
         assert!(pool.voices[1].current_note > 60.5 && pool.voices[1].current_note < 72.0);
+    }
+
+    #[test]
+    fn mono_and_legato_modes_keep_single_playing_voice() {
+        let bank = &load_built_in_banks(None)[0];
+        let mut pool = VoicePool::default();
+        let legato_params = SoundParams {
+            voice_mode: VoiceMode::Legato,
+            glide_ms: 80.0,
+            ..SoundParams::default()
+        };
+        pool.handle_event_with_params(
+            MidiEvent::NoteOn {
+                channel: 0,
+                note: 60,
+                velocity: 100,
+            },
+            bank,
+            44_100,
+            legato_params,
+        );
+        pool.handle_event_with_params(
+            MidiEvent::NoteOn {
+                channel: 0,
+                note: 67,
+                velocity: 100,
+            },
+            bank,
+            44_100,
+            legato_params,
+        );
+        let playing_count = pool
+            .voices
+            .iter()
+            .filter(|v| v.state == VoiceState::Playing)
+            .count();
+        assert_eq!(playing_count, 1);
+        assert_eq!(pool.voices[0].note, 67);
     }
 }
 

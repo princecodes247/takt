@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use takt_engine::audio::list_output_devices;
 use takt_engine::engine::TaktEngine;
 use takt_engine::midi::{list_midi_devices, MidiDeviceWatcher, MidiEvent};
-use takt_engine::voice::SoundParams;
+use takt_engine::voice::{SoundParams, VoiceMode};
 use tauri::{Emitter, Manager, State};
 
 type Reply<T> = mpsc::SyncSender<Result<T, String>>;
@@ -53,7 +53,7 @@ struct SoundDto {
     supported_params: Vec<&'static str>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SoundParamsDto {
     brightness: f32,
@@ -69,10 +69,17 @@ struct SoundParamsDto {
     chorus_mix: f32,
     tremolo_depth: f32,
     delay_mix: f32,
+    voice_mode: String,
 }
 
 impl From<SoundParams> for SoundParamsDto {
     fn from(p: SoundParams) -> Self {
+        let voice_mode = match p.voice_mode {
+            VoiceMode::Poly => "poly",
+            VoiceMode::Mono => "mono",
+            VoiceMode::Legato => "legato",
+        }
+        .to_string();
         Self {
             brightness: p.brightness,
             attack_ms: p.attack_ms,
@@ -87,12 +94,18 @@ impl From<SoundParams> for SoundParamsDto {
             chorus_mix: p.chorus_mix,
             tremolo_depth: p.tremolo_depth,
             delay_mix: p.delay_mix,
+            voice_mode,
         }
     }
 }
 
 impl From<SoundParamsDto> for SoundParams {
     fn from(p: SoundParamsDto) -> Self {
+        let voice_mode = match p.voice_mode.as_str() {
+            "mono" => VoiceMode::Mono,
+            "legato" => VoiceMode::Legato,
+            _ => VoiceMode::Poly,
+        };
         Self {
             brightness: p.brightness,
             attack_ms: p.attack_ms,
@@ -107,6 +120,7 @@ impl From<SoundParamsDto> for SoundParams {
             chorus_mix: p.chorus_mix,
             tremolo_depth: p.tremolo_depth,
             delay_mix: p.delay_mix,
+            voice_mode,
         }
     }
 }

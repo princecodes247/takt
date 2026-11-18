@@ -54,6 +54,7 @@ interface SoundParamsDto {
   chorusMix: number;
   tremoloDepth: number;
   delayMix: number;
+  voiceMode: "poly" | "mono" | "legato";
 }
 
 const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
@@ -70,6 +71,7 @@ const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
   chorusMix: 0.0,
   tremoloDepth: 0.0,
   delayMix: 0.0,
+  voiceMode: "poly",
 };
 
 interface InitialStateDto {
@@ -735,7 +737,15 @@ export default function App() {
               color: "var(--text-muted)",
             }}
           >
-            {status ? `${status.sampleRate} Hz · 32-voice poly` : "Loading…"}
+            {status
+              ? `${status.sampleRate} Hz · ${
+                  status.soundParams.voiceMode === "mono"
+                    ? "Monophonic"
+                    : status.soundParams.voiceMode === "legato"
+                      ? "Mono Legato"
+                      : "32-voice poly"
+                }`
+              : "Loading…"}
           </div>
         </div>
       </section>
@@ -826,6 +836,30 @@ export default function App() {
         </div>
 
         <div className="params-strip" aria-label="Voice Shaping">
+          <div className="param-mode" role="group" aria-label="Voice Mode">
+            <span className="param-mode-label">Mode</span>
+            <div className="mode-pills">
+              {(["poly", "mono", "legato"] as const).map((mode) => {
+                const active =
+                  (status?.soundParams.voiceMode ?? "poly") === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`mode-pill ${active ? "active" : ""}`}
+                    onClick={() => handleSoundParamChange({ voiceMode: mode })}
+                  >
+                    {mode === "poly"
+                      ? "Poly"
+                      : mode === "mono"
+                        ? "Mono"
+                        : "Legato"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {supportedParams.has("glide") && (
             <div className="param-item">
               <div className="param-head">

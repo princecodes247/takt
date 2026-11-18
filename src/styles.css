@@ -801,3 +801,43 @@ input[type="range"] {
   color: var(--text-primary);
 }
 
+.param-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.param-mode-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.mode-pills {
+  display: inline-flex;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mode-pill {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.mode-pill:hover {
+  color: var(--text-primary);
+}
+
+.mode-pill.active {
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--accent);
+}
+
