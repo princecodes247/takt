@@ -228,16 +228,110 @@ const BLACK_KEYS = FULL_PIANO_KEYS.filter((k) => k.isBlack);
 
 const KEYBOARD_STORAGE_KEY = "takt:computer-keyboard";
 const CHORD_STORAGE_KEY = "takt:chord-detect";
-const FAVORITES_STORAGE_KEY = "takt:favorites";
+const PATCHES_STORAGE_KEY = "takt:patches-v1";
 
-const DEFAULT_FAVORITE_IDS = [
-  "model-d",
-  "jrhodes3d-stereo",
-  "upright-piano-kw",
-  "fm-piano1",
-  "pad",
-  "gs-000-048-strings",
-];
+interface SnapshotLayerState {
+  enabled: boolean;
+  volume: number;
+  minNote: number;
+  maxNote: number;
+  octaveShift: number;
+  params: SoundParamsDto;
+}
+
+interface PatchSnapshot {
+  id: string;
+  name: string;
+  layers: SnapshotLayerState[];
+  worshipPadEnabled: boolean;
+  worshipPadKey: number;
+}
+
+interface Patch {
+  id: string;
+  name: string;
+  layerSoundIds: string[];
+  snapshots: PatchSnapshot[];
+}
+
+function makeDefaultPatches(): Patch[] {
+  const baseLayer = (
+    enabled = true,
+    volume = 0.85,
+    octaveShift = 0,
+    params: Partial<SoundParamsDto> = {}
+  ): SnapshotLayerState => ({
+    enabled,
+    volume,
+    minNote: 21,
+    maxNote: 108,
+    octaveShift,
+    params: { ...DEFAULT_SOUND_PARAMS, ...params },
+  });
+
+  return [
+    {
+      id: "patch-worship",
+      name: "Sunday Worship",
+      layerSoundIds: ["model-d", "pad", "gs-000-048-strings"],
+      snapshots: [
+        {
+          id: "snap-1",
+          name: "Verse (Piano)",
+          layers: [
+            baseLayer(true, 0.9),
+            baseLayer(false, 0.55),
+            baseLayer(false, 0.6),
+          ],
+          worshipPadEnabled: true,
+          worshipPadKey: 0,
+        },
+        {
+          id: "snap-2",
+          name: "Chorus (Full)",
+          layers: [
+            baseLayer(true, 0.9, 0, { reverbMix: 0.28 }),
+            baseLayer(true, 0.6, 0, { chorusMix: 0.45, reverbMix: 0.35 }),
+            baseLayer(true, 0.65, 1, { reverbMix: 0.35 }),
+          ],
+          worshipPadEnabled: true,
+          worshipPadKey: 0,
+        },
+      ],
+    },
+    {
+      id: "patch-rhodes",
+      name: "Rhodes & Pad",
+      layerSoundIds: ["jrhodes3d-stereo", "pad"],
+      snapshots: [
+        {
+          id: "snap-1",
+          name: "Default",
+          layers: [
+            baseLayer(true, 0.88, 0, { tremoloDepth: 0.35, chorusMix: 0.25 }),
+            baseLayer(true, 0.52),
+          ],
+          worshipPadEnabled: false,
+          worshipPadKey: 0,
+        },
+      ],
+    },
+    {
+      id: "patch-solo",
+      name: "Acoustic Grand",
+      layerSoundIds: ["model-d"],
+      snapshots: [
+        {
+          id: "snap-1",
+          name: "Default",
+          layers: [baseLayer(true, 0.9)],
+          worshipPadEnabled: false,
+          worshipPadKey: 0,
+        },
+      ],
+    },
+  ];
+}
 
 const SECONDARY_PORT_RE =
   /\b(mackie|hui|daw|editor|ctrl|control|din|thru|remote|sysex)\b/i;
@@ -332,18 +426,31 @@ export default function App() {
   const [pickerTarget, setPickerTarget] = useState<number | "add" | null>(null);
   // Layer DSP inspector modal: layer index or null
   const [editingLayerIdx, setEditingLayerIdx] = useState<number | null>(null);
-  const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
+  const [patches, setPatches] = useState<Patch[]>(() => {
     try {
-      const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+      const raw = localStorage.getItem(PATCHES_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed.slice(0, 8);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {
       // ignore
     }
-    return DEFAULT_FAVORITE_IDS;
+    return makeDefaultPatches();
   });
+  const [activePatchId, setActivePatchId] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem(PATCHES_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed[0].id;
+      }
+    } catch {
+      // ignore
+    }
+    return "patch-worship";
+  });
+  const [activeSnapshotIdx, setActiveSnapshotIdx] = useState<number>(0);
   const [keyboardEnabled, setKeyboardEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(KEYBOARD_STORAGE_KEY);
@@ -383,25 +490,226 @@ export default function App() {
 
   const layers = status?.layers ?? [];
 
-  const handleSelectFavorite = useCallback(
-    async (soundId: string) => {
+  const activePatch = useMemo(
+    () => patches.find((p) => p.id === activePatchId) ?? patches[0] ?? null,
+    [patches, activePatchId]
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PATCHES_STORAGE_KEY, JSON.stringify(patches));
+    } catch {
+      // ignore
+    }
+  }, [patches]);
+
+  const applySnapshotToEngine = useCallback(
+    async (snap: PatchSnapshot, currentLayers: LayerDto[]) => {
+      const count = Math.min(snap.layers.length, currentLayers.length);
+      for (let i = 0; i < count; i++) {
+        const l = snap.layers[i];
+        await invoke("update_layer", {
+          index: i,
+          enabled: l.enabled,
+          volume: l.volume,
+          minNote: l.minNote,
+          maxNote: l.maxNote,
+          octaveShift: l.octaveShift,
+          params: l.params,
+        });
+      }
+      const next = await invoke<StatusDto>("set_worship_pad", {
+        enabled: snap.worshipPadEnabled,
+        key: snap.worshipPadKey,
+      });
+      setStatus(next);
+    },
+    []
+  );
+
+  const handleLoadPatch = useCallback(
+    async (patch: Patch, snapIdx = 0) => {
       if (loadingTarget !== null) return;
       setError(null);
-      setLoadingTarget(soundId);
+      setLoadingTarget(patch.id);
+      setActivePatchId(patch.id);
+      const targetSnapIdx = Math.min(
+        snapIdx,
+        Math.max(0, patch.snapshots.length - 1)
+      );
+      setActiveSnapshotIdx(targetSnapIdx);
+
       try {
-        const next = await invoke<StatusDto>("set_layer_sound", {
-          index: 0,
-          soundId,
-        });
-        setStatus(next);
+        const soundSet = new Set(sounds.map((s) => s.id));
+        const validIds = patch.layerSoundIds.map((id) =>
+          soundSet.has(id) ? id : sounds[0]?.id ?? "model-d"
+        );
+        let latest = status;
+        const curLen = latest?.layers.length ?? 1;
+
+        for (let i = curLen - 1; i >= validIds.length; i--) {
+          latest = await invoke<StatusDto>("remove_layer", { index: i });
+        }
+        for (let i = 0; i < validIds.length; i++) {
+          if (i < (latest?.layers.length ?? 0)) {
+            if (latest?.layers[i].soundId !== validIds[i]) {
+              latest = await invoke<StatusDto>("set_layer_sound", {
+                index: i,
+                soundId: validIds[i],
+              });
+            }
+          } else {
+            latest = await invoke<StatusDto>("add_layer", {
+              soundId: validIds[i],
+            });
+          }
+        }
+        if (latest) {
+          setStatus(latest);
+          const snap = patch.snapshots[targetSnapIdx];
+          if (snap) {
+            await applySnapshotToEngine(snap, latest.layers);
+          }
+        }
       } catch (err) {
         setError(String(err));
       } finally {
         setLoadingTarget(null);
       }
     },
-    [loadingTarget]
+    [loadingTarget, sounds, status, applySnapshotToEngine]
   );
+
+  const handleSelectSnapshot = useCallback(
+    async (idx: number) => {
+      if (!activePatch || !status) return;
+      const snap = activePatch.snapshots[idx];
+      if (!snap) return;
+      setActiveSnapshotIdx(idx);
+      try {
+        await applySnapshotToEngine(snap, status.layers);
+      } catch (err) {
+        setError(String(err));
+      }
+    },
+    [activePatch, status, applySnapshotToEngine]
+  );
+
+  const handleSaveCurrentSnapshot = () => {
+    if (!activePatch || !status) return;
+    const snapLayers: SnapshotLayerState[] = status.layers.map((l) => ({
+      enabled: l.enabled,
+      volume: l.volume,
+      minNote: l.minNote,
+      maxNote: l.maxNote,
+      octaveShift: l.octaveShift,
+      params: { ...l.params },
+    }));
+    const layerSoundIds = status.layers.map((l) => l.soundId);
+
+    setPatches((prev) =>
+      prev.map((p) => {
+        if (p.id !== activePatch.id) return p;
+        const nextSnaps = p.snapshots.map((s, i) =>
+          i === activeSnapshotIdx
+            ? {
+                ...s,
+                layers: snapLayers,
+                worshipPadEnabled: status.worshipPadEnabled,
+                worshipPadKey: status.worshipPadKey,
+              }
+            : s
+        );
+        return { ...p, layerSoundIds, snapshots: nextSnaps };
+      })
+    );
+  };
+
+  const handleAddSnapshot = () => {
+    if (!activePatch || !status) return;
+    const nextNum = activePatch.snapshots.length + 1;
+    const newSnap: PatchSnapshot = {
+      id: `snap-${Date.now()}`,
+      name: `Snapshot ${nextNum}`,
+      layers: status.layers.map((l) => ({
+        enabled: l.enabled,
+        volume: l.volume,
+        minNote: l.minNote,
+        maxNote: l.maxNote,
+        octaveShift: l.octaveShift,
+        params: { ...l.params },
+      })),
+      worshipPadEnabled: status.worshipPadEnabled,
+      worshipPadKey: status.worshipPadKey,
+    };
+    const nextIdx = activePatch.snapshots.length;
+    setPatches((prev) =>
+      prev.map((p) =>
+        p.id === activePatch.id
+          ? {
+              ...p,
+              layerSoundIds: status.layers.map((l) => l.soundId),
+              snapshots: [...p.snapshots, newSnap],
+            }
+          : p
+      )
+    );
+    setActiveSnapshotIdx(nextIdx);
+  };
+
+  const handleDeleteSnapshot = (idx: number) => {
+    if (!activePatch || activePatch.snapshots.length <= 1) return;
+    const nextSnaps = activePatch.snapshots.filter((_, i) => i !== idx);
+    setPatches((prev) =>
+      prev.map((p) =>
+        p.id === activePatch.id ? { ...p, snapshots: nextSnaps } : p
+      )
+    );
+    const nextIdx = Math.min(activeSnapshotIdx, nextSnaps.length - 1);
+    setActiveSnapshotIdx(nextIdx);
+  };
+
+  const handleCreatePatch = () => {
+    if (!status) return;
+    const name = window.prompt(
+      "New Patch Name:",
+      `Patch ${patches.length + 1}`
+    );
+    if (!name || !name.trim()) return;
+    const newPatch: Patch = {
+      id: `patch-${Date.now()}`,
+      name: name.trim(),
+      layerSoundIds: status.layers.map((l) => l.soundId),
+      snapshots: [
+        {
+          id: `snap-${Date.now()}`,
+          name: "Default",
+          layers: status.layers.map((l) => ({
+            enabled: l.enabled,
+            volume: l.volume,
+            minNote: l.minNote,
+            maxNote: l.maxNote,
+            octaveShift: l.octaveShift,
+            params: { ...l.params },
+          })),
+          worshipPadEnabled: status.worshipPadEnabled,
+          worshipPadKey: status.worshipPadKey,
+        },
+      ],
+    };
+    setPatches((prev) => [...prev, newPatch]);
+    setActivePatchId(newPatch.id);
+    setActiveSnapshotIdx(0);
+  };
+
+  const handleDeletePatch = (patchId: string) => {
+    if (patches.length <= 1) return;
+    const next = patches.filter((p) => p.id !== patchId);
+    setPatches(next);
+    if (activePatchId === patchId && next[0]) {
+      handleLoadPatch(next[0], 0);
+    }
+  };
 
   const handleAssignSound = useCallback(
     async (target: number | "add", soundId: string) => {
@@ -521,87 +829,16 @@ export default function App() {
   }, [handleUpdateLayer]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favoriteIds));
-    } catch {
-      // ignore
-    }
-  }, [favoriteIds]);
-
-  const favoriteSounds = useMemo(() => {
-    const byId = new Map(sounds.map((s) => [s.id, s]));
-    return favoriteIds
-      .map((id) => byId.get(id))
-      .filter((s): s is SoundDto => s !== undefined);
-  }, [sounds, favoriteIds]);
-
-  const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
-
-  const toggleFavorite = (soundId: string) => {
-    setFavoriteIds((prev) => {
-      if (prev.includes(soundId)) {
-        return prev.filter((id) => id !== soundId);
-      }
-      if (prev.length >= 8) {
-        return [...prev.slice(1), soundId];
-      }
-      return [...prev, soundId];
-    });
-  };
-
-  useEffect(() => {
-    invoke<InitialStateDto>("get_initial_state")
-      .then((data) => {
-        setMidiDevices(data.midiDevices);
-        setAudioDevices(data.audioDevices);
-        setSounds(data.sounds);
-        setStatus(data.status);
-      })
-      .catch((err) => setError(String(err)));
-
-    const unlistenTelemetry = listen<TelemetryDto>(
-      "takt://telemetry",
-      (event) => {
-        setStatus((prev) =>
-          prev
-            ? {
-                ...prev,
-                isPlaying: event.payload.isPlaying,
-                activeVoices: event.payload.activeVoices,
-                estimatedLatencyMs: event.payload.estimatedLatencyMs,
-                midiDevices: event.payload.midiDevices,
-                desiredMidiDevices: event.payload.desiredMidiDevices,
-                backingTrackPlaying: event.payload.backingTrackPlaying,
-                backingTrackPositionMs: event.payload.backingTrackPositionMs,
-                backingTrackDurationMs: event.payload.backingTrackDurationMs,
-              }
-            : prev
-        );
-        setActiveMidiNotes(new Set(event.payload.activeMidiNotes));
-      }
-    );
-
-    const unlistenMidi = listen<string[]>("takt://midi-devices", (event) => {
-      setMidiDevices(event.payload);
-    });
-
-    return () => {
-      unlistenTelemetry.then((fn) => fn());
-      unlistenMidi.then((fn) => fn());
-    };
-  }, []);
-
-  useEffect(() => {
     const unlistenPc = listen<number>("takt://program-change", (event) => {
-      const target = favoriteSounds[event.payload];
-      if (target) {
-        handleSelectFavorite(target.id);
+      const targetPatch = patches[event.payload];
+      if (targetPatch) {
+        handleLoadPatch(targetPatch, 0);
       }
     });
     return () => {
       unlistenPc.then((fn) => fn());
     };
-  }, [favoriteSounds, handleSelectFavorite]);
+  }, [patches, handleLoadPatch]);
 
   const releaseAllKeyboardNotes = useCallback(() => {
     if (activeKeyNotesRef.current.size === 0) return;
@@ -1397,32 +1634,83 @@ export default function App() {
           <aside className="stage-sidebar">
             <section className="sidebar-card favorites-card">
               <div className="sidebar-card-head">
-                <label>Favorites</label>
+                <label>Patches</label>
                 <button
                   type="button"
-                  className="btn-mini"
-                  onClick={() => setPickerTarget(0)}
+                  className="btn-mini active"
+                  onClick={handleCreatePatch}
+                  title="Save current layers as a new Patch"
                 >
-                  Browse ({sounds.length})
+                  + New
                 </button>
               </div>
               <div className="favorites-list">
-                {favoriteSounds.map((fav, idx) => {
-                  const selected = layers[0]?.soundId === fav.id;
-                  const isLoading = loadingTarget === fav.id;
+                {patches.map((patch, idx) => {
+                  const selected = patch.id === activePatch?.id;
+                  const isLoading = loadingTarget === patch.id;
                   return (
-                    <button
-                      key={fav.id}
-                      type="button"
-                      disabled={loadingTarget !== null}
-                      className={`fav-row ${selected ? "selected" : ""} ${isLoading ? "loading" : ""}`}
-                      onClick={() => handleSelectFavorite(fav.id)}
+                    <div
+                      key={patch.id}
+                      className={`patch-row-wrap ${selected ? "selected" : ""} ${isLoading ? "loading" : ""}`}
                     >
-                      <span className="fav-num">0{idx + 1}</span>
-                      <span className="fav-name">{fav.name}</span>
-                    </button>
+                      <button
+                        type="button"
+                        disabled={loadingTarget !== null}
+                        className="patch-row-btn"
+                        onClick={() => handleLoadPatch(patch, 0)}
+                      >
+                        <span className="fav-num">
+                          {String(idx + 1).padStart(2, "0")}
+                        </span>
+                        <span className="fav-name">{patch.name}</span>
+                        <span className="patch-meta">
+                          {patch.layerSoundIds.length}L · {patch.snapshots.length}S
+                        </span>
+                      </button>
+                      {patches.length > 1 && (
+                        <button
+                          type="button"
+                          className="patch-del-btn"
+                          onClick={() => handleDeletePatch(patch.id)}
+                          title="Delete Patch"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
+              </div>
+              <div className="patch-nav-row">
+                <button
+                  type="button"
+                  className="btn-mini"
+                  disabled={patches.length <= 1 || loadingTarget !== null}
+                  onClick={() => {
+                    const cur = patches.findIndex(
+                      (p) => p.id === activePatch?.id
+                    );
+                    const prev =
+                      (cur - 1 + patches.length) % patches.length;
+                    handleLoadPatch(patches[prev], 0);
+                  }}
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  className="btn-mini"
+                  disabled={patches.length <= 1 || loadingTarget !== null}
+                  onClick={() => {
+                    const cur = patches.findIndex(
+                      (p) => p.id === activePatch?.id
+                    );
+                    const next = (cur + 1) % patches.length;
+                    handleLoadPatch(patches[next], 0);
+                  }}
+                >
+                  Next
+                </button>
               </div>
             </section>
 
@@ -1590,7 +1878,7 @@ export default function App() {
             </section>
           </aside>
 
-          {/* Main Stage: Layered Sound Channel Strips */}
+          {/* Main Stage: Layered Sound Channel Strips + Snapshots Bar */}
           <section className="layers-stage" aria-label="Sound Layers">
             <div className="layers-row">
               {layers.map((layer, idx) => {
@@ -1798,6 +2086,59 @@ export default function App() {
                 </button>
               )}
             </div>
+
+            {/* Snapshots Bar inside current Patch */}
+            {activePatch && (
+              <div className="snapshots-bar" aria-label="Patch Snapshots">
+                <div className="snapshots-list">
+                  {activePatch.snapshots.map((snap, idx) => {
+                    const active = idx === activeSnapshotIdx;
+                    return (
+                      <div
+                        key={snap.id}
+                        className={`snap-chip ${active ? "active" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="snap-btn"
+                          onClick={() => handleSelectSnapshot(idx)}
+                        >
+                          <span className="snap-name">{snap.name}</span>
+                        </button>
+                        {activePatch.snapshots.length > 1 && (
+                          <button
+                            type="button"
+                            className="snap-del"
+                            onClick={() => handleDeleteSnapshot(idx)}
+                            title="Delete Snapshot"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="snapshots-actions">
+                  <button
+                    type="button"
+                    className="btn-mini"
+                    onClick={handleAddSnapshot}
+                    title="Add new Snapshot from current state"
+                  >
+                    + Snap
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-mini active"
+                    onClick={handleSaveCurrentSnapshot}
+                    title="Save current layer levels/effects into active Snapshot"
+                  >
+                    Save Snap
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         </div>
       )}
@@ -2050,7 +2391,6 @@ export default function App() {
             <div className="modal-sound-grid">
               {filteredSounds.map((sound, idx) => {
                 const isLoading = loadingTarget === sound.id;
-                const isFav = favoriteSet.has(sound.id);
                 return (
                   <div
                     key={sound.id}
@@ -2070,16 +2410,6 @@ export default function App() {
                             : String(idx + 1).padStart(2, "0")}
                       </span>
                       <span className="sound-pad-title">{sound.name}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`star-btn ${isFav ? "starred" : ""}`}
-                      onClick={() => toggleFavorite(sound.id)}
-                      title={
-                        isFav ? "Remove from Favorites" : "Pin to Favorites"
-                      }
-                    >
-                      {isFav ? "★" : "☆"}
                     </button>
                   </div>
                 );

@@ -620,14 +620,17 @@ input:focus-visible {
   min-width: 0;
   min-height: 0;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .layers-row {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(170px, 1fr));
   gap: 10px;
   width: 100%;
-  height: 100%;
 }
 
 .layer-strip {
@@ -1659,4 +1662,133 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
 
 .zone-handle.right {
   right: -6px;
+}
+
+/* Patches & Snapshots */
+.patch-row-wrap {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.patch-row-wrap.selected {
+  border-color: var(--accent);
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.patch-row-wrap.loading {
+  border-color: var(--accent);
+  animation: pad-pulse 900ms ease-in-out infinite;
+}
+
+.patch-row-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.patch-meta {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.patch-del-btn {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.patch-del-btn:hover {
+  color: #fecaca;
+}
+
+.patch-nav-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.snapshots-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  padding: 5px 8px;
+  flex-shrink: 0;
+}
+
+.snapshots-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.snap-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.snap-chip.active {
+  border-color: var(--accent);
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.snap-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.snap-chip.active .snap-btn {
+  color: var(--accent);
+}
+
+.snap-del {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.snapshots-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
