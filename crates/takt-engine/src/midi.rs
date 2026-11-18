@@ -27,6 +27,10 @@ pub enum MidiEvent {
         /// Signed 14-bit pitch bend in `-8192..=8191` (`0` is center).
         value: i16,
     },
+    ProgramChange {
+        channel: u8,
+        program: u8,
+    },
     AllNotesOff,
 }
 
@@ -88,6 +92,10 @@ pub fn parse_midi_message(bytes: &[u8]) -> Option<MidiEvent> {
             let msb = (*bytes.get(2)? & 0x7F) as i16;
             let value = ((msb << 7) | lsb) - 8192;
             Some(MidiEvent::PitchBend { channel, value })
+        }
+        0xC0 => {
+            let program = *bytes.get(1)? & 0x7F;
+            Some(MidiEvent::ProgramChange { channel, program })
         }
         _ => None,
     }

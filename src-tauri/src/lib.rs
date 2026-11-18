@@ -584,6 +584,10 @@ pub fn run() {
                         }
                     }
 
+                    if let Some(program) = engine.take_program_change() {
+                        let _ = app_handle.emit("takt://program-change", program);
+                    }
+
                     if last_telemetry.elapsed() >= telemetry_interval {
                         last_telemetry = Instant::now();
                         let st = engine.status();

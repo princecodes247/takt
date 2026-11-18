@@ -66,6 +66,7 @@ pub struct TaktEngine {
     is_playing: Arc<AtomicBool>,
     active_voices: Arc<AtomicUsize>,
     midi_active_notes: Arc<[AtomicU64; 2]>,
+    last_program_change: Arc<AtomicI8>,
     // Backing track state
     current_track: Option<Arc<SampleData>>,
     current_track_name: Option<String>,
@@ -112,6 +113,7 @@ impl TaktEngine {
             is_playing: Arc::new(AtomicBool::new(false)),
             active_voices: Arc::new(AtomicUsize::new(0)),
             midi_active_notes: Arc::new([AtomicU64::new(0), AtomicU64::new(0)]),
+            last_program_change: Arc::new(AtomicI8::new(-1)),
             current_track: Some(Arc::new(synthesize_demo_backing_track())),
             current_track_name: Some("Demo Groove · 120 BPM (C)".to_string()),
             track_tx,
@@ -302,6 +304,16 @@ impl TaktEngine {
         self.sound_params.store(params);
     }
 
+    /// Returns the most recent MIDI Program Change (`0..=127`), clearing it atomically.
+    pub fn take_program_change(&self) -> Option<u8> {
+        let v = self.last_program_change.swap(-1, Ordering::AcqRel);
+        if v >= 0 {
+            Some(v as u8)
+        } else {
+            None
+        }
+    }
+
     pub fn status(&mut self) -> EngineStatus {
         self.drain_reclaimed_banks();
         let (audio_device, sample_rate, buffer_size, estimated_latency_ms) =
@@ -408,6 +420,7 @@ impl TaktEngine {
         let playing_atomic = Arc::clone(&self.is_playing);
         let voices_atomic = Arc::clone(&self.active_voices);
         let midi_notes_atomic = Arc::clone(&self.midi_active_notes);
+        let program_change_atomic = Arc::clone(&self.last_program_change);
         let sound_params_atomic = Arc::clone(&self.sound_params);
         midi_notes_atomic[0].store(0, Ordering::Relaxed);
         midi_notes_atomic[1].store(0, Ordering::Relaxed);
@@ -444,6 +457,9 @@ impl TaktEngine {
                     MidiEvent::AllNotesOff => {
                         midi_notes_atomic[0].store(0, Ordering::Relaxed);
                         midi_notes_atomic[1].store(0, Ordering::Relaxed);
+                    }
+                    MidiEvent::ProgramChange { program, .. } => {
+                        program_change_atomic.store((program & 127) as i8, Ordering::Release);
                     }
                     _ => {}
                 }

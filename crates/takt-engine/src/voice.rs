@@ -652,6 +652,7 @@ impl VoicePool {
             MidiEvent::PitchBend { value, .. } => {
                 self.pitch_bend_semitones = (value as f32 / 8192.0) * PITCH_BEND_SEMITONES;
             }
+            MidiEvent::ProgramChange { .. } => {}
             MidiEvent::AllNotesOff => {
                 self.sustain_pressed = false;
                 self.mono_stack_len = 0;
