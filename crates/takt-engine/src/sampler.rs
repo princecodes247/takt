@@ -124,7 +124,13 @@ fn decode_media_stream(
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| EngineError::SampleLoad(format!("decoder init failed: {e}")))?;
 
-    let mut frames = Vec::new();
+    let mut frames = Vec::with_capacity(
+        track
+            .codec_params
+            .n_frames
+            .map(|n| n as usize)
+            .unwrap_or(0),
+    );
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
     loop {
@@ -578,43 +584,60 @@ fn build_zones_from_multi_roots(mut roots: Vec<(u8, u8, SampleData)>) -> Vec<Sam
     }
 
     let count = groups.len();
-    let mut zones = Vec::new();
-    for (i, (root_note, vel_layers)) in groups.iter().enumerate() {
-        let min_note = if i == 0 {
-            0
-        } else {
-            ((groups[i - 1].0 as u16 + *root_note as u16) / 2 + 1) as u8
-        };
-        let max_note = if i + 1 == count {
-            127
-        } else {
-            ((*root_note as u16 + groups[i + 1].0 as u16) / 2) as u8
-        };
-
-        let vcount = vel_layers.len();
-        for (vi, (root_vel, sample)) in vel_layers.iter().enumerate() {
-            let min_vel = if vi == 0 {
+    let group_ranges: Vec<(u8, u8)> = (0..count)
+        .map(|i| {
+            let min_note = if i == 0 {
                 0
             } else {
-                ((vel_layers[vi - 1].0 as u16 + *root_vel as u16) / 2 + 1) as u8
+                ((groups[i - 1].0 as u16 + groups[i].0 as u16) / 2 + 1) as u8
             };
-            let max_vel = if vi + 1 == vcount {
+            let max_note = if i + 1 == count {
                 127
             } else {
-                ((*root_vel as u16 + vel_layers[vi + 1].0 as u16) / 2) as u8
+                ((groups[i].0 as u16 + groups[i + 1].0 as u16) / 2) as u8
             };
+            (min_note, max_note)
+        })
+        .collect();
+
+    let mut zones = Vec::with_capacity(roots_len(&groups));
+    for (i, (root_note, vel_layers)) in groups.into_iter().enumerate() {
+        let (min_note, max_note) = group_ranges[i];
+        let vcount = vel_layers.len();
+        let vel_ranges: Vec<(u8, u8)> = (0..vcount)
+            .map(|vi| {
+                let min_vel = if vi == 0 {
+                    0
+                } else {
+                    ((vel_layers[vi - 1].0 as u16 + vel_layers[vi].0 as u16) / 2 + 1) as u8
+                };
+                let max_vel = if vi + 1 == vcount {
+                    127
+                } else {
+                    ((vel_layers[vi].0 as u16 + vel_layers[vi + 1].0 as u16) / 2) as u8
+                };
+                (min_vel, max_vel)
+            })
+            .collect();
+
+        for (vi, (root_vel, sample)) in vel_layers.into_iter().enumerate() {
+            let (min_vel, max_vel) = vel_ranges[vi];
             zones.push(SampleZone {
                 min_note,
                 max_note,
-                root_note: *root_note,
+                root_note,
                 min_vel,
                 max_vel,
-                root_vel: *root_vel,
-                sample: sample.clone(),
+                root_vel,
+                sample,
             });
         }
     }
     zones
+}
+
+fn roots_len(groups: &[(u8, Vec<(u8, SampleData)>)]) -> usize {
+    groups.iter().map(|(_, v)| v.len()).sum()
 }
 
 fn synthesize_starter_bank(id: &str, name: &str, release_ms: f32) -> SampleBank {
