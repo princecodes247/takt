@@ -59,6 +59,7 @@ interface StatusDto {
   masterVolume: number;
   isPlaying: boolean;
   activeVoices: number;
+  sustainActive: boolean;
   backingTrackName: string | null;
   backingTrackPlaying: boolean;
   backingTrackLoop: boolean;
@@ -103,6 +104,7 @@ interface TelemetryDto {
   midiDevices: string[];
   desiredMidiDevices: string[];
   activeMidiNotes: number[];
+  sustainActive: boolean;
   backingTrackPlaying: boolean;
   backingTrackPositionMs: number;
   backingTrackDurationMs: number;
@@ -850,6 +852,7 @@ export default function App() {
                 estimatedLatencyMs: event.payload.estimatedLatencyMs,
                 midiDevices: event.payload.midiDevices,
                 desiredMidiDevices: event.payload.desiredMidiDevices,
+                sustainActive: event.payload.sustainActive,
                 backingTrackPlaying: event.payload.backingTrackPlaying,
                 backingTrackPositionMs: event.payload.backingTrackPositionMs,
                 backingTrackDurationMs: event.payload.backingTrackDurationMs,
@@ -2202,6 +2205,23 @@ export default function App() {
             )}
 
             <div className="keyboard-controls">
+              <button
+                type="button"
+                aria-pressed={Boolean(status?.sustainActive)}
+                className={`toggle-pill sustain-pill ${status?.sustainActive ? "on" : ""}`}
+                title="Toggle Sustain (CC 64) · also lights up when sustain pedal is stepped on"
+                onClick={() => {
+                  const next = !status?.sustainActive;
+                  setStatus((prev) =>
+                    prev ? { ...prev, sustainActive: next } : prev
+                  );
+                  void invoke("set_sustain", { pressed: next });
+                }}
+              >
+                <span className="toggle-dot" aria-hidden="true" />
+                <span>SUSTAIN</span>
+              </button>
+
               <button
                 type="button"
                 role="switch"

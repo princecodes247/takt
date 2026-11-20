@@ -20,6 +20,7 @@ enum EngineCmd {
     SetVolume(f32),
     Panic(Reply<StatusDto>),
     TestNote(u8, bool, u8),
+    SetSustain(bool),
     MidiDevicesChanged,
     LoadBackingTrack(String, Vec<u8>, String, Reply<StatusDto>),
     SetBackingTrackPlaying(bool, Reply<StatusDto>),
@@ -166,6 +167,7 @@ struct StatusDto {
     master_volume: f32,
     is_playing: bool,
     active_voices: usize,
+    sustain_active: bool,
     backing_track_name: Option<String>,
     backing_track_playing: bool,
     backing_track_loop: bool,
@@ -197,6 +199,7 @@ struct TelemetryDto {
     midi_devices: Vec<String>,
     desired_midi_devices: Vec<String>,
     active_midi_notes: Vec<u8>,
+    sustain_active: bool,
     backing_track_playing: bool,
     backing_track_position_ms: u32,
     backing_track_duration_ms: u32,
@@ -215,6 +218,7 @@ fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
         master_volume: st.master_volume,
         is_playing: st.is_playing,
         active_voices: st.active_voices,
+        sustain_active: st.sustain_active,
         backing_track_name: st.backing_track_name,
         backing_track_playing: st.backing_track_playing,
         backing_track_loop: st.backing_track_loop,
@@ -351,6 +355,14 @@ fn trigger_test_note(
     state
         .tx
         .send(EngineCmd::TestNote(note, down, vel))
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
+#[tauri::command]
+async fn set_sustain(state: State<'_, AppState>, pressed: bool) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::SetSustain(pressed))
         .map_err(|_| "engine thread stopped".to_string())
 }
 
@@ -622,6 +634,9 @@ pub fn run() {
                             };
                             engine.inject_midi_event(event);
                         }
+                        EngineCmd::SetSustain(pressed) => {
+                            engine.set_sustain(pressed);
+                        }
                         EngineCmd::MidiDevicesChanged => {
                             *midi_changed = true;
                         }
@@ -704,10 +719,10 @@ pub fn run() {
                     drop(process_cmd);
 
                     if midi_changed {
+                        engine.sync_midi_connections();
                         let current_midi = collect_midi_names();
                         if current_midi != last_midi_list {
                             last_midi_list = current_midi.clone();
-                            engine.sync_midi_connections();
                             let _ = app_handle.emit("takt://midi-devices", current_midi);
                         }
                     }
@@ -728,6 +743,7 @@ pub fn run() {
                                 midi_devices: st.midi_devices,
                                 desired_midi_devices: st.desired_midi_devices,
                                 active_midi_notes: st.active_midi_notes,
+                                sustain_active: st.sustain_active,
                                 backing_track_playing: st.backing_track_playing,
                                 backing_track_position_ms: st.backing_track_position_ms,
                                 backing_track_duration_ms: st.backing_track_duration_ms,
@@ -755,6 +771,7 @@ pub fn run() {
             set_volume,
             panic_all_notes_off,
             trigger_test_note,
+            set_sustain,
             load_backing_track,
             set_backing_track_playing,
             set_backing_track_loop,

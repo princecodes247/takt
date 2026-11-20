@@ -54,6 +54,7 @@ pub struct EngineStatus {
     pub is_playing: bool,
     pub active_voices: usize,
     pub active_midi_notes: Vec<u8>,
+    pub sustain_active: bool,
     pub backing_track_name: Option<String>,
     pub backing_track_playing: bool,
     pub backing_track_loop: bool,
@@ -129,6 +130,7 @@ pub struct TaktEngine {
     is_playing: Arc<AtomicBool>,
     active_voices: Arc<AtomicUsize>,
     midi_active_notes: Arc<[AtomicU64; 2]>,
+    sustain_active: Arc<AtomicBool>,
     last_program_change: Arc<AtomicI8>,
     // Backing track state
     current_track: Option<Arc<SampleData>>,
@@ -186,6 +188,7 @@ impl TaktEngine {
             is_playing: Arc::new(AtomicBool::new(false)),
             active_voices: Arc::new(AtomicUsize::new(0)),
             midi_active_notes: Arc::new([AtomicU64::new(0), AtomicU64::new(0)]),
+            sustain_active: Arc::new(AtomicBool::new(false)),
             last_program_change: Arc::new(AtomicI8::new(-1)),
             current_track: Some(Arc::new(synthesize_demo_backing_track())),
             current_track_name: Some("Demo Groove · 120 BPM (C)".to_string()),
@@ -275,12 +278,13 @@ impl TaktEngine {
                 continue;
             }
             let prod_clone = Arc::clone(&prod_arc);
-            if let Ok(handle) = open_midi_input(name, move |event| {
+            match open_midi_input(name, move |event| {
                 if let Ok(mut guard) = prod_clone.lock() {
                     let _ = guard.push(event);
                 }
             }) {
-                self.midi_handles.push(handle);
+                Ok(handle) => self.midi_handles.push(handle),
+                Err(e) => eprintln!("[takt-engine] failed to open MIDI input '{name}': {e}"),
             }
         }
     }
@@ -402,6 +406,14 @@ impl TaktEngine {
     /// Injects a MIDI event directly (useful for testing and soak harnesses).
     pub fn inject_midi_event(&mut self, event: MidiEvent) {
         let _ = self.ctrl_tx.push(event);
+    }
+
+    /// Engages or releases the sustain pedal (CC 64 on channel 0).
+    pub fn set_sustain(&mut self, pressed: bool) {
+        self.inject_midi_event(MidiEvent::SustainPedal {
+            channel: 0,
+            pressed,
+        });
     }
 
     /// Decodes and loads a backing track (WAV, FLAC, OGG) into memory and queues it to the audio thread.
@@ -540,6 +552,7 @@ impl TaktEngine {
             is_playing: self.is_playing.load(Ordering::Relaxed),
             active_voices: self.active_voices.load(Ordering::Relaxed),
             active_midi_notes,
+            sustain_active: self.sustain_active.load(Ordering::Relaxed),
             backing_track_name: self.current_track_name.clone(),
             backing_track_playing: self.track_playing.load(Ordering::Relaxed),
             backing_track_loop: self.track_looping.load(Ordering::Relaxed),
@@ -622,9 +635,11 @@ impl TaktEngine {
         let playing_atomic = Arc::clone(&self.is_playing);
         let voices_atomic = Arc::clone(&self.active_voices);
         let midi_notes_atomic = Arc::clone(&self.midi_active_notes);
+        let sustain_atomic = Arc::clone(&self.sustain_active);
         let program_change_atomic = Arc::clone(&self.last_program_change);
         midi_notes_atomic[0].store(0, Ordering::Relaxed);
         midi_notes_atomic[1].store(0, Ordering::Relaxed);
+        sustain_atomic.store(false, Ordering::Relaxed);
 
         let route_event_to_layer = |layer: &mut AudioLayer, ev: MidiEvent, sample_rate: u32| {
             let params = layer.params.load();
@@ -708,9 +723,16 @@ impl TaktEngine {
 
             // 2. Drain control events and MIDI events.
             while let Ok(ev) = ctrl_rx.pop() {
-                if matches!(ev, MidiEvent::AllNotesOff) {
-                    midi_notes_atomic[0].store(0, Ordering::Relaxed);
-                    midi_notes_atomic[1].store(0, Ordering::Relaxed);
+                match ev {
+                    MidiEvent::SustainPedal { pressed, .. } => {
+                        sustain_atomic.store(pressed, Ordering::Relaxed);
+                    }
+                    MidiEvent::AllNotesOff => {
+                        midi_notes_atomic[0].store(0, Ordering::Relaxed);
+                        midi_notes_atomic[1].store(0, Ordering::Relaxed);
+                        sustain_atomic.store(false, Ordering::Relaxed);
+                    }
+                    _ => {}
                 }
                 for layer in &mut audio_layers {
                     route_event_to_layer(layer, ev, sample_rate);
@@ -728,9 +750,13 @@ impl TaktEngine {
                         midi_notes_atomic[(n >> 6) as usize]
                             .fetch_and(!(1u64 << (n & 63)), Ordering::Relaxed);
                     }
+                    MidiEvent::SustainPedal { pressed, .. } => {
+                        sustain_atomic.store(pressed, Ordering::Relaxed);
+                    }
                     MidiEvent::AllNotesOff => {
                         midi_notes_atomic[0].store(0, Ordering::Relaxed);
                         midi_notes_atomic[1].store(0, Ordering::Relaxed);
+                        sustain_atomic.store(false, Ordering::Relaxed);
                     }
                     MidiEvent::ProgramChange { program, .. } => {
                         program_change_atomic.store((program & 127) as i8, Ordering::Release);
