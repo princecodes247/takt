@@ -231,6 +231,38 @@ const BLACK_KEYS = FULL_PIANO_KEYS.filter((k) => k.isBlack);
 const KEYBOARD_STORAGE_KEY = "takt:computer-keyboard";
 const CHORD_STORAGE_KEY = "takt:chord-detect";
 const PATCHES_STORAGE_KEY = "takt:patches-v1";
+const SNAPSHOT_MORPH_MS = 450;
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function interpolateSoundParams(
+  from: SoundParamsDto,
+  to: SoundParamsDto,
+  t: number
+): SoundParamsDto {
+  return {
+    brightness: lerp(from.brightness, to.brightness, t),
+    attackMs: lerp(from.attackMs, to.attackMs, t),
+    releaseMs: lerp(from.releaseMs, to.releaseMs, t),
+    reverbMix: lerp(from.reverbMix, to.reverbMix, t),
+    stereoWidth: lerp(from.stereoWidth, to.stereoWidth, t),
+    hammerHardness: lerp(from.hammerHardness, to.hammerHardness, t),
+    sampleOffsetMs: lerp(from.sampleOffsetMs, to.sampleOffsetMs, t),
+    velTrack: lerp(from.velTrack, to.velTrack, t),
+    glideMs: lerp(from.glideMs, to.glideMs, t),
+    resonance: lerp(from.resonance, to.resonance, t),
+    chorusMix: lerp(from.chorusMix, to.chorusMix, t),
+    tremoloDepth: lerp(from.tremoloDepth, to.tremoloDepth, t),
+    delayMix: lerp(from.delayMix, to.delayMix, t),
+    voiceMode: to.voiceMode,
+  };
+}
 
 interface SnapshotLayerState {
   enabled: boolean;
@@ -453,6 +485,15 @@ export default function App() {
     return "patch-worship";
   });
   const [activeSnapshotIdx, setActiveSnapshotIdx] = useState<number>(0);
+  const snapshotAnimRef = useRef<number | null>(null);
+  const cancelSnapshotAnim = useCallback(() => {
+    if (snapshotAnimRef.current !== null) {
+      cancelAnimationFrame(snapshotAnimRef.current);
+      snapshotAnimRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelSnapshotAnim, [cancelSnapshotAnim]);
   const [keyboardEnabled, setKeyboardEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(KEYBOARD_STORAGE_KEY);
@@ -532,6 +573,7 @@ export default function App() {
   const handleLoadPatch = useCallback(
     async (patch: Patch, snapIdx = 0) => {
       if (loadingTarget !== null) return;
+      cancelSnapshotAnim();
       setError(null);
       setLoadingTarget(patch.id);
       setActivePatchId(patch.id);
@@ -579,7 +621,7 @@ export default function App() {
         setLoadingTarget(null);
       }
     },
-    [loadingTarget, sounds, status, applySnapshotToEngine]
+    [loadingTarget, sounds, status, applySnapshotToEngine, cancelSnapshotAnim]
   );
 
   const handleSelectSnapshot = useCallback(
@@ -587,14 +629,83 @@ export default function App() {
       if (!activePatch || !status) return;
       const snap = activePatch.snapshots[idx];
       if (!snap) return;
+
+      cancelSnapshotAnim();
       setActiveSnapshotIdx(idx);
+
+      const startLayers = status.layers;
+      const count = Math.min(snap.layers.length, startLayers.length);
+
       try {
-        await applySnapshotToEngine(snap, status.layers);
+        const nextPadStatus = await invoke<StatusDto>("set_worship_pad", {
+          enabled: snap.worshipPadEnabled,
+          key: snap.worshipPadKey,
+        });
+        setStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                worshipPadEnabled: nextPadStatus.worshipPadEnabled,
+                worshipPadKey: nextPadStatus.worshipPadKey,
+              }
+            : nextPadStatus
+        );
       } catch (err) {
         setError(String(err));
       }
+
+      if (count === 0) return;
+
+      const startTime = performance.now();
+      const step = (now: number) => {
+        const rawT = Math.min(1, (now - startTime) / SNAPSHOT_MORPH_MS);
+        const eased = easeInOutCubic(rawT);
+        const done = rawT >= 1;
+
+        const morphedLayers: LayerDto[] = startLayers.map((from, i) => {
+          if (i >= count) return from;
+          const to = snap.layers[i];
+          const fromVol = from.enabled ? from.volume : 0;
+          const toVol = to.enabled ? to.volume : 0;
+          const enabled = done ? to.enabled : from.enabled || to.enabled;
+          const volume = done ? to.volume : lerp(fromVol, toVol, eased);
+          const params = done
+            ? to.params
+            : interpolateSoundParams(from.params, to.params, eased);
+
+          void invoke("update_layer", {
+            index: i,
+            enabled,
+            volume,
+            minNote: to.minNote,
+            maxNote: to.maxNote,
+            octaveShift: to.octaveShift,
+            params,
+          }).catch(() => {});
+
+          return {
+            ...from,
+            enabled,
+            volume,
+            minNote: to.minNote,
+            maxNote: to.maxNote,
+            octaveShift: to.octaveShift,
+            params,
+          };
+        });
+
+        setStatus((prev) => (prev ? { ...prev, layers: morphedLayers } : prev));
+
+        if (!done) {
+          snapshotAnimRef.current = requestAnimationFrame(step);
+        } else {
+          snapshotAnimRef.current = null;
+        }
+      };
+
+      snapshotAnimRef.current = requestAnimationFrame(step);
     },
-    [activePatch, status, applySnapshotToEngine]
+    [activePatch, status, cancelSnapshotAnim]
   );
 
   const handleSaveCurrentSnapshot = () => {
@@ -753,6 +864,7 @@ export default function App() {
       index: number,
       patch: Partial<LayerDto> & { paramsPatch?: Partial<SoundParamsDto> }
     ) => {
+      cancelSnapshotAnim();
       const layer = status?.layers[index];
       if (!layer) return;
       const nextLayer: LayerDto = {
@@ -783,7 +895,7 @@ export default function App() {
         setError(String(err));
       }
     },
-    [status?.layers]
+    [status?.layers, cancelSnapshotAnim]
   );
 
   useEffect(() => {
