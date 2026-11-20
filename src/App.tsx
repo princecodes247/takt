@@ -1274,6 +1274,15 @@ export default function App() {
       ? currentAudioDevice.supportedBufferSizes
       : DEFAULT_BUFFERS;
 
+  const handleRefreshMidiDevices = useCallback(async () => {
+    try {
+      const devices = await invoke<string[]>("refresh_midi_devices");
+      setMidiDevices(devices);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
   const handleToggleMidiDevice = async (deviceName: string) => {
     setError(null);
     const current = status?.desiredMidiDevices ?? [];
@@ -1428,7 +1437,12 @@ export default function App() {
           <button
             type="button"
             className={`btn-setup ${setupOpen ? "active" : ""}`}
-            onClick={() => setSetupOpen((v) => !v)}
+            onClick={() =>
+              setSetupOpen((v) => {
+                if (!v) void handleRefreshMidiDevices();
+                return !v;
+              })
+            }
             aria-expanded={setupOpen}
           >
             <span aria-hidden="true">⚙</span>
@@ -1452,6 +1466,13 @@ export default function App() {
                 <span className="midi-count">
                   {status?.midiDevices.length ?? 0} active
                 </span>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => void handleRefreshMidiDevices()}
+                >
+                  Refresh
+                </button>
                 <label className="checkbox-inline">
                   <input
                     type="checkbox"

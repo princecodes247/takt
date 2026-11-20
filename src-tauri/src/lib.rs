@@ -299,6 +299,14 @@ async fn refresh_audio_devices() -> Vec<AudioDeviceDto> {
 }
 
 #[tauri::command]
+async fn refresh_midi_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let _ = state.tx.send(EngineCmd::MidiDevicesChanged);
+    tauri::async_runtime::spawn_blocking(collect_midi_names)
+        .await
+        .map_err(|e| format!("failed to list MIDI devices: {e}"))
+}
+
+#[tauri::command]
 async fn select_midi_device(
     state: State<'_, AppState>,
     device_name: Option<String>,
@@ -559,6 +567,8 @@ pub fn run() {
                 .ok();
 
                 let mut last_midi_list = collect_midi_names();
+                let midi_scan_interval = Duration::from_millis(750);
+                let mut last_midi_scan = Instant::now();
                 let telemetry_interval = Duration::from_millis(50);
                 let mut last_telemetry = Instant::now();
                 let mut pending_cmd: Option<EngineCmd> = None;
@@ -718,6 +728,17 @@ pub fn run() {
                     }
                     drop(process_cmd);
 
+                    if last_midi_scan.elapsed() >= midi_scan_interval {
+                        last_midi_scan = Instant::now();
+                        let current_midi = collect_midi_names();
+                        if current_midi != last_midi_list {
+                            last_midi_list = current_midi.clone();
+                            engine.sync_midi_connections();
+                            let _ = app_handle.emit("takt://midi-devices", current_midi);
+                            midi_changed = false;
+                        }
+                    }
+
                     if midi_changed {
                         engine.sync_midi_connections();
                         let current_midi = collect_midi_names();
@@ -764,6 +785,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_initial_state,
             refresh_audio_devices,
+            refresh_midi_devices,
             select_midi_device,
             set_midi_devices,
             select_audio_device,

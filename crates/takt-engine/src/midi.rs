@@ -200,8 +200,14 @@ mod watcher {
                     match client {
                         Ok(_client) => {
                             let _ = tx.send(Ok(run_loop));
-                            if !stopped_thread.load(Ordering::Acquire) {
+                            while !stopped_thread.load(Ordering::Acquire) {
                                 CFRunLoop::run_current();
+                                // On modern macOS, CoreMIDI may deliver notifications via XPC/dispatch
+                                // without attaching a source to this thread's CFRunLoop, causing
+                                // run_current() to return immediately. Keep `_client` alive until Drop.
+                                if !stopped_thread.load(Ordering::Acquire) {
+                                    std::thread::sleep(std::time::Duration::from_millis(250));
+                                }
                             }
                         }
                         Err(status) => {
