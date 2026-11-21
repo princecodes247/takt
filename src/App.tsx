@@ -295,6 +295,148 @@ function formatDb(vol: number): string {
   return `${db.toFixed(2)} dB`;
 }
 
+interface CustomSelectOption {
+  value: string;
+  label: string;
+}
+
+function CustomSelect({
+  id,
+  ariaLabel,
+  value,
+  options,
+  onChange,
+  className = "",
+}: {
+  id?: string;
+  ariaLabel?: string;
+  value: string;
+  options: CustomSelectOption[];
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const currentLabel =
+    options.find((o) => o.value === value)?.label ?? value;
+
+  return (
+    <div
+      ref={wrapRef}
+      className={`custom-select ${open ? "open" : ""} ${className}`}
+    >
+      <button
+        id={id}
+        type="button"
+        className="custom-select-trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="custom-select-value">{currentLabel}</span>
+        <svg
+          className="custom-select-chevron"
+          viewBox="0 0 24 24"
+          width="14"
+          height="14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="custom-select-menu" role="listbox" aria-label={ariaLabel}>
+          {options.map((opt) => {
+            const active = opt.value === value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={`custom-select-option ${active ? "active" : ""}`}
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+              >
+                <span className="custom-select-check" aria-hidden="true">
+                  {active ? "✓" : ""}
+                </span>
+                <span>{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TYPE_FACETS = [
+  "Acoustic Piano",
+  "Electric Piano",
+  "Digital Piano",
+  "Piano",
+  "Pad",
+  "Bell",
+  "Organ",
+  "Synth",
+  "Bass",
+  "Strings",
+  "Brass",
+  "Guitar",
+  "Lead",
+  "Choir",
+  "Keys",
+];
+
+function soundMatchesFacet(sound: SoundDto, facet: string): boolean {
+  const f = facet.toLowerCase();
+  return (
+    sound.name.toLowerCase().includes(f) ||
+    sound.category.toLowerCase().includes(f) ||
+    sound.supportedParams.some((p) => p.toLowerCase().includes(f))
+  );
+}
+
+function getSoundLibrary(sound: SoundDto): string {
+  if (
+    sound.id.startsWith("sk-") ||
+    sound.name.toLowerCase().includes("sunday") ||
+    sound.name.startsWith("SK ")
+  ) {
+    return "Sunday Keys";
+  }
+  return "Takt Library";
+}
+
 function makeDefaultPatches(): Patch[] {
   const baseLayer = (
     enabled = true,
@@ -465,6 +607,15 @@ export default function App() {
   const [leftTab, setLeftTab] = useState<"pad" | "track">("pad");
   // Voice picker modal: null = closed, number = replace layer index, "add" = add new layer
   const [pickerTarget, setPickerTarget] = useState<number | "add" | null>(null);
+  const [soundLibrary, setSoundLibrary] = useState<string>("All");
+  const [soundType, setSoundType] = useState<string>("All");
+  const [soundSortBy, setSoundSortBy] = useState<"name" | "category">("name");
+  const [soundSortAsc, setSoundSortAsc] = useState<boolean>(true);
+  const [pickerSelectedId, setPickerSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPickerSelectedId(null);
+  }, [pickerTarget]);
   // Layer DSP inspector modal: layer index or null
   const [editingLayerIdx, setEditingLayerIdx] = useState<number | null>(null);
   const [patches, setPatches] = useState<Patch[]>(() => {
@@ -1139,24 +1290,60 @@ export default function App() {
     for (const s of sounds) {
       counts.set(s.category, (counts.get(s.category) ?? 0) + 1);
     }
-    return Array.from(counts.entries()).map(([name, count]) => ({
-      name,
-      count,
-    }));
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [sounds]);
+
+  const soundLibraries = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sounds) set.add(getSoundLibrary(s));
+    return Array.from(set).sort();
+  }, [sounds]);
+
+  const availableTypes = useMemo(
+    () => TYPE_FACETS.filter((f) => sounds.some((s) => soundMatchesFacet(s, f))),
+    [sounds]
+  );
 
   const filteredSounds = useMemo(() => {
     const q = soundSearch.trim().toLowerCase();
-    if (q) {
-      return sounds.filter(
-        (s) =>
+    const list = sounds.filter((s) => {
+      if (soundLibrary !== "All" && getSoundLibrary(s) !== soundLibrary) {
+        return false;
+      }
+      if (selectedCategory !== "All" && s.category !== selectedCategory) {
+        return false;
+      }
+      if (soundType !== "All" && !soundMatchesFacet(s, soundType)) {
+        return false;
+      }
+      if (q) {
+        return (
           s.name.toLowerCase().includes(q) ||
           s.category.toLowerCase().includes(q)
-      );
-    }
-    if (selectedCategory === "All") return sounds;
-    return sounds.filter((s) => s.category === selectedCategory);
-  }, [sounds, selectedCategory, soundSearch]);
+        );
+      }
+      return true;
+    });
+
+    const sorted = [...list].sort((a, b) => {
+      const cmp =
+        soundSortBy === "category"
+          ? a.category.localeCompare(b.category) || a.name.localeCompare(b.name)
+          : a.name.localeCompare(b.name);
+      return soundSortAsc ? cmp : -cmp;
+    });
+    return sorted;
+  }, [
+    sounds,
+    soundLibrary,
+    selectedCategory,
+    soundType,
+    soundSearch,
+    soundSortBy,
+    soundSortAsc,
+  ]);
 
   const groupedMidi = useMemo(() => groupMidiDevices(midiDevices), [midiDevices]);
 
@@ -1561,39 +1748,42 @@ export default function App() {
           <div className="grid-2">
             <div className="field">
               <label htmlFor="audio-select">Audio Output</label>
-              <select
+              <CustomSelect
                 id="audio-select"
+                ariaLabel="Audio Output"
                 value={status?.audioDevice ?? ""}
-                onChange={(e) =>
-                  handleAudioChange(e.target.value, status?.bufferSize ?? null)
+                options={audioDevices.map((dev) => ({
+                  value: dev.name,
+                  label: `${dev.name}${dev.isDefault ? " (Default)" : ""}`,
+                }))}
+                onChange={(val) =>
+                  handleAudioChange(val, status?.bufferSize ?? null)
                 }
-              >
-                {audioDevices.map((dev) => (
-                  <option key={dev.name} value={dev.name}>
-                    {dev.name} {dev.isDefault ? "(Default)" : ""}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
 
             <div className="field">
               <label htmlFor="buffer-select">Buffer Size</label>
-              <select
+              <CustomSelect
                 id="buffer-select"
-                value={status?.bufferSize ?? ""}
-                onChange={(e) => {
-                  const val =
-                    e.target.value === "" ? null : Number(e.target.value);
-                  handleAudioChange(status?.audioDevice ?? "", val);
+                ariaLabel="Buffer Size"
+                value={
+                  status?.bufferSize !== null && status?.bufferSize !== undefined
+                    ? String(status.bufferSize)
+                    : ""
+                }
+                options={[
+                  { value: "", label: "System Default" },
+                  ...bufferChoices.map((frames) => ({
+                    value: String(frames),
+                    label: `${frames} samples`,
+                  })),
+                ]}
+                onChange={(val) => {
+                  const nextBuf = val === "" ? null : Number(val);
+                  handleAudioChange(status?.audioDevice ?? "", nextBuf);
                 }}
-              >
-                <option value="">System Default</option>
-                {bufferChoices.map((frames) => (
-                  <option key={frames} value={frames}>
-                    {frames} samples
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           </div>
 
@@ -2785,107 +2975,214 @@ export default function App() {
         </footer>
       )}
 
-      {/* Voice Picker Modal */}
+      {/* Sound Browser Modal (Sunday Keys 1:1) */}
       {pickerTarget !== null && (
         <div
           className="modal-backdrop"
           onClick={() => setPickerTarget(null)}
         >
           <div
-            className="modal-card"
+            className="modal-card sound-browser-modal"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
-            aria-label="Choose Voice"
+            aria-label="Sound Select"
           >
-            <div className="modal-head">
-              <div className="sound-title-row">
-                <label>
-                  {pickerTarget === "add"
-                    ? "Add Sound Layer"
-                    : `Select Voice for Layer ${pickerTarget + 1}`}
-                </label>
-                {loadingTarget && (
-                  <span className="sound-loading-status">Loading samples…</span>
-                )}
+            {/* Top Bar: Library | Colored Module Title | Search */}
+            <div className="sb-header">
+              <div className="sb-library-wrap">
+                <span className="sb-label">Library</span>
+                <CustomSelect
+                  ariaLabel="Library"
+                  className="sb-dropdown"
+                  value={soundLibrary}
+                  options={[
+                    { value: "All", label: "All Sounds" },
+                    ...soundLibraries.map((lib) => ({ value: lib, label: lib })),
+                  ]}
+                  onChange={setSoundLibrary}
+                />
               </div>
-              <div className="modal-head-right">
+
+              <div className="sb-title-center">
+                <span
+                  className="sb-module-dot"
+                  style={{
+                    background:
+                      LAYER_COLORS[
+                        (pickerTarget === "add"
+                          ? layers.length
+                          : pickerTarget) % LAYER_COLORS.length
+                      ],
+                  }}
+                />
+                <span className="sb-title-text">
+                  {pickerTarget === "add"
+                    ? `Add Sound to Module ${layers.length + 1}`
+                    : `Select Sound for Module ${pickerTarget + 1}`}
+                </span>
+              </div>
+
+              <div className="sb-search-wrap">
+                <svg
+                  className="sb-search-icon"
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M20 20l-3.5-3.5" />
+                </svg>
                 <input
                   type="search"
-                  className="voice-search"
-                  placeholder={`Search ${sounds.length} voices…`}
+                  className="sb-search-input"
+                  placeholder="Search"
                   value={soundSearch}
                   onChange={(e) => setSoundSearch(e.target.value)}
                   autoFocus
                 />
-                <button
-                  type="button"
-                  className="btn-mini"
-                  onClick={() => setPickerTarget(null)}
-                >
-                  Close
-                </button>
               </div>
             </div>
 
-            <div className="category-tabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={selectedCategory === "All" && !soundSearch}
-                className={`cat-tab ${selectedCategory === "All" && !soundSearch ? "active" : ""}`}
-                onClick={() => {
-                  setSoundSearch("");
-                  setSelectedCategory("All");
-                }}
-              >
-                All ({sounds.length})
-              </button>
-              {soundCategories.map((cat) => {
-                const active = selectedCategory === cat.name && !soundSearch;
-                return (
+            {/* 3-Column Browser Body */}
+            <div className="sb-columns">
+              {/* Column 1: Category */}
+              <div className="sb-col">
+                <div className="sb-col-title">Category</div>
+                <div className="sb-col-list" role="listbox" aria-label="Category">
                   <button
-                    key={cat.name}
                     type="button"
-                    role="tab"
-                    aria-selected={active}
-                    className={`cat-tab ${active ? "active" : ""}`}
-                    onClick={() => {
-                      setSoundSearch("");
-                      setSelectedCategory(cat.name);
-                    }}
+                    className={`sb-item ${selectedCategory === "All" ? "active" : ""}`}
+                    onClick={() => setSelectedCategory("All")}
                   >
-                    {cat.name} ({cat.count})
+                    All
                   </button>
-                );
-              })}
+                  {soundCategories.map((cat) => (
+                    <button
+                      key={cat.name}
+                      type="button"
+                      className={`sb-item ${selectedCategory === cat.name ? "active" : ""}`}
+                      onClick={() => setSelectedCategory(cat.name)}
+                    >
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Column 2: Type */}
+              <div className="sb-col">
+                <div className="sb-col-title">Type</div>
+                <div className="sb-col-list" role="listbox" aria-label="Type">
+                  <button
+                    type="button"
+                    className={`sb-item ${soundType === "All" ? "active" : ""}`}
+                    onClick={() => setSoundType("All")}
+                  >
+                    All
+                  </button>
+                  {availableTypes.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`sb-item ${soundType === t ? "active" : ""}`}
+                      onClick={() => setSoundType(t)}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Column 3: Results List */}
+              <div className="sb-col sb-results-col">
+                <div className="sb-results-head">
+                  <span className="sb-label">Order by</span>
+                  <CustomSelect
+                    ariaLabel="Order by"
+                    className="sb-dropdown sb-order-select"
+                    value={soundSortBy}
+                    options={[
+                      { value: "name", label: "Name" },
+                      { value: "category", label: "Category" },
+                    ]}
+                    onChange={(val) =>
+                      setSoundSortBy(val as "name" | "category")
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="sb-sort-dir-btn"
+                    onClick={() => setSoundSortAsc((v) => !v)}
+                    title={soundSortAsc ? "Ascending" : "Descending"}
+                  >
+                    {soundSortAsc ? "↓≡" : "↑≡"}
+                  </button>
+                </div>
+
+                <div className="sb-results-list" role="listbox" aria-label="Sounds">
+                  {filteredSounds.map((sound) => {
+                    const selected = pickerSelectedId === sound.id;
+                    const dotCount = Math.min(
+                      6,
+                      Math.max(2, Math.ceil(sound.supportedParams.length / 2))
+                    );
+                    return (
+                      <button
+                        key={sound.id}
+                        type="button"
+                        className={`sb-result-row ${selected ? "active" : ""}`}
+                        onClick={() => setPickerSelectedId(sound.id)}
+                        onDoubleClick={() =>
+                          handleAssignSound(pickerTarget, sound.id)
+                        }
+                      >
+                        <span className="sb-result-name">{sound.name}</span>
+                        <span className="sb-result-dots" aria-hidden="true">
+                          {Array.from({ length: 6 }).map((_, d) => (
+                            <span
+                              key={d}
+                              className={`sb-dot ${d < dotCount ? "lit" : ""}`}
+                            />
+                          ))}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {filteredSounds.length === 0 && (
+                    <div className="sb-empty">No sounds match filters</div>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="modal-sound-grid">
-              {filteredSounds.map((sound, idx) => {
-                const isLoading = loadingTarget === sound.id;
-                return (
-                  <div
-                    key={sound.id}
-                    className={`sound-pad-wrap ${isLoading ? "loading" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      disabled={loadingTarget !== null}
-                      className="sound-pad-btn"
-                      onClick={() => handleAssignSound(pickerTarget, sound.id)}
-                    >
-                      <span className="sound-pad-meta">
-                        {isLoading
-                          ? "LOADING…"
-                          : soundSearch
-                            ? sound.category
-                            : String(idx + 1).padStart(2, "0")}
-                      </span>
-                      <span className="sound-pad-title">{sound.name}</span>
-                    </button>
-                  </div>
-                );
-              })}
+            {/* Bottom Action Footer */}
+            <div className="sb-footer">
+              <button
+                type="button"
+                className="sb-btn-cancel"
+                onClick={() => setPickerTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="sb-btn-confirm"
+                disabled={!pickerSelectedId || loadingTarget !== null}
+                onClick={() => {
+                  if (pickerSelectedId) {
+                    void handleAssignSound(pickerTarget, pickerSelectedId);
+                  }
+                }}
+              >
+                {loadingTarget
+                  ? "Loading…"
+                  : pickerTarget === "add"
+                    ? "Add Sound"
+                    : "Select Sound"}
+              </button>
             </div>
           </div>
         </div>
