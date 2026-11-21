@@ -59,6 +59,42 @@ pub struct SoundParams {
     pub delay_mix: f32,
     /// Poly / Mono / Legato voice mode.
     pub voice_mode: VoiceMode,
+    /// Decay time in milliseconds (`10.0..=10000.0`).
+    pub decay_ms: f32,
+    /// Sustain level in `0.0..=1.0`.
+    pub sustain_level: f32,
+    /// Mod-wheel low-pass filter minimum cutoff in Hz (`20.0..=20000.0`).
+    pub mod_filter_min_hz: f32,
+    /// Mod-wheel low-pass filter maximum cutoff in Hz (`20.0..=20000.0`).
+    pub mod_filter_max_hz: f32,
+    /// Compressor enabled flag.
+    pub comp_enabled: bool,
+    /// Compressor input gain in dB (`-12.0..=12.0`).
+    pub comp_input_db: f32,
+    /// Compressor attack in ms (`1.0..=100.0`).
+    pub comp_attack_ms: f32,
+    /// Compressor release in ms (`10.0..=500.0`).
+    pub comp_release_ms: f32,
+    /// Compressor ratio (`1.0..=20.0`).
+    pub comp_ratio: f32,
+    /// Compressor threshold in dB (`-60.0..=0.0`).
+    pub comp_threshold_db: f32,
+    /// Compressor wet/dry mix (`0.0..=1.0`).
+    pub comp_mix: f32,
+    /// Compressor output makeup gain in dB (`-12.0..=12.0`).
+    pub comp_output_db: f32,
+    /// 8-band Equalizer enabled flag.
+    pub eq_enabled: bool,
+    /// 8-band EQ frequencies (HPF, LowShelf, Peak1..4, HighShelf, LPF).
+    pub eq_freqs: [f32; 8],
+    /// 6 EQ gains in dB (LowShelf, Peak1..4, HighShelf).
+    pub eq_gains: [f32; 6],
+    /// 4 EQ bandwidths (Peak1..4).
+    pub eq_qs: [f32; 4],
+    /// Ignore sustain pedal for this layer.
+    pub block_sustain: bool,
+    /// Stereo pan in `-1.0..=1.0`.
+    pub pan: f32,
 }
 
 impl Default for SoundParams {
@@ -78,6 +114,24 @@ impl Default for SoundParams {
             tremolo_depth: 0.0,
             delay_mix: 0.0,
             voice_mode: VoiceMode::Poly,
+            decay_ms: 10000.0,
+            sustain_level: 1.0,
+            mod_filter_min_hz: 200.0,
+            mod_filter_max_hz: 20000.0,
+            comp_enabled: false,
+            comp_input_db: 0.0,
+            comp_attack_ms: 15.0,
+            comp_release_ms: 49.0,
+            comp_ratio: 4.2,
+            comp_threshold_db: -29.0,
+            comp_mix: 0.85,
+            comp_output_db: 3.5,
+            eq_enabled: false,
+            eq_freqs: [67.0, 200.0, 197.0, 345.0, 1000.0, 5417.0, 1101.0, 9000.0],
+            eq_gains: [0.0; 6],
+            eq_qs: [0.28, 0.30, 0.50, 0.36],
+            block_sustain: false,
+            pan: 0.0,
         }
     }
 }
@@ -98,6 +152,24 @@ pub struct AtomicSoundParams {
     tremolo_depth: AtomicU32,
     delay_mix: AtomicU32,
     voice_mode: AtomicU8,
+    decay_ms: AtomicU32,
+    sustain_level: AtomicU32,
+    mod_filter_min_hz: AtomicU32,
+    mod_filter_max_hz: AtomicU32,
+    comp_enabled: AtomicU8,
+    comp_input_db: AtomicU32,
+    comp_attack_ms: AtomicU32,
+    comp_release_ms: AtomicU32,
+    comp_ratio: AtomicU32,
+    comp_threshold_db: AtomicU32,
+    comp_mix: AtomicU32,
+    comp_output_db: AtomicU32,
+    eq_enabled: AtomicU8,
+    eq_freqs: [AtomicU32; 8],
+    eq_gains: [AtomicU32; 6],
+    eq_qs: [AtomicU32; 4],
+    block_sustain: AtomicU8,
+    pan: AtomicU32,
 }
 
 impl Default for AtomicSoundParams {
@@ -118,6 +190,24 @@ impl Default for AtomicSoundParams {
             tremolo_depth: AtomicU32::new(d.tremolo_depth.to_bits()),
             delay_mix: AtomicU32::new(d.delay_mix.to_bits()),
             voice_mode: AtomicU8::new(d.voice_mode as u8),
+            decay_ms: AtomicU32::new(d.decay_ms.to_bits()),
+            sustain_level: AtomicU32::new(d.sustain_level.to_bits()),
+            mod_filter_min_hz: AtomicU32::new(d.mod_filter_min_hz.to_bits()),
+            mod_filter_max_hz: AtomicU32::new(d.mod_filter_max_hz.to_bits()),
+            comp_enabled: AtomicU8::new(u8::from(d.comp_enabled)),
+            comp_input_db: AtomicU32::new(d.comp_input_db.to_bits()),
+            comp_attack_ms: AtomicU32::new(d.comp_attack_ms.to_bits()),
+            comp_release_ms: AtomicU32::new(d.comp_release_ms.to_bits()),
+            comp_ratio: AtomicU32::new(d.comp_ratio.to_bits()),
+            comp_threshold_db: AtomicU32::new(d.comp_threshold_db.to_bits()),
+            comp_mix: AtomicU32::new(d.comp_mix.to_bits()),
+            comp_output_db: AtomicU32::new(d.comp_output_db.to_bits()),
+            eq_enabled: AtomicU8::new(u8::from(d.eq_enabled)),
+            eq_freqs: d.eq_freqs.map(|v| AtomicU32::new(v.to_bits())),
+            eq_gains: d.eq_gains.map(|v| AtomicU32::new(v.to_bits())),
+            eq_qs: d.eq_qs.map(|v| AtomicU32::new(v.to_bits())),
+            block_sustain: AtomicU8::new(u8::from(d.block_sustain)),
+            pan: AtomicU32::new(d.pan.to_bits()),
         }
     }
 }
@@ -127,9 +217,9 @@ impl AtomicSoundParams {
         self.brightness
             .store(p.brightness.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         self.attack_ms
-            .store(p.attack_ms.clamp(0.0, 400.0).to_bits(), Ordering::Relaxed);
+            .store(p.attack_ms.clamp(0.0, 2000.0).to_bits(), Ordering::Relaxed);
         self.release_ms
-            .store(p.release_ms.clamp(20.0, 1500.0).to_bits(), Ordering::Relaxed);
+            .store(p.release_ms.clamp(20.0, 5000.0).to_bits(), Ordering::Relaxed);
         self.reverb_mix
             .store(p.reverb_mix.clamp(0.0, 0.7).to_bits(), Ordering::Relaxed);
         self.stereo_width
@@ -152,6 +242,45 @@ impl AtomicSoundParams {
             .store(p.delay_mix.clamp(0.0, 0.6).to_bits(), Ordering::Relaxed);
         self.voice_mode
             .store(p.voice_mode as u8, Ordering::Relaxed);
+        self.decay_ms
+            .store(p.decay_ms.clamp(10.0, 10000.0).to_bits(), Ordering::Relaxed);
+        self.sustain_level
+            .store(p.sustain_level.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.mod_filter_min_hz
+            .store(p.mod_filter_min_hz.clamp(20.0, 20000.0).to_bits(), Ordering::Relaxed);
+        self.mod_filter_max_hz
+            .store(p.mod_filter_max_hz.clamp(20.0, 20000.0).to_bits(), Ordering::Relaxed);
+        self.comp_enabled
+            .store(u8::from(p.comp_enabled), Ordering::Relaxed);
+        self.comp_input_db
+            .store(p.comp_input_db.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
+        self.comp_attack_ms
+            .store(p.comp_attack_ms.clamp(1.0, 100.0).to_bits(), Ordering::Relaxed);
+        self.comp_release_ms
+            .store(p.comp_release_ms.clamp(10.0, 500.0).to_bits(), Ordering::Relaxed);
+        self.comp_ratio
+            .store(p.comp_ratio.clamp(1.0, 20.0).to_bits(), Ordering::Relaxed);
+        self.comp_threshold_db
+            .store(p.comp_threshold_db.clamp(-60.0, 0.0).to_bits(), Ordering::Relaxed);
+        self.comp_mix
+            .store(p.comp_mix.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.comp_output_db
+            .store(p.comp_output_db.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
+        self.eq_enabled
+            .store(u8::from(p.eq_enabled), Ordering::Relaxed);
+        for (a, v) in self.eq_freqs.iter().zip(p.eq_freqs) {
+            a.store(v.clamp(20.0, 20000.0).to_bits(), Ordering::Relaxed);
+        }
+        for (a, v) in self.eq_gains.iter().zip(p.eq_gains) {
+            a.store(v.clamp(-18.0, 18.0).to_bits(), Ordering::Relaxed);
+        }
+        for (a, v) in self.eq_qs.iter().zip(p.eq_qs) {
+            a.store(v.clamp(0.1, 4.0).to_bits(), Ordering::Relaxed);
+        }
+        self.block_sustain
+            .store(u8::from(p.block_sustain), Ordering::Relaxed);
+        self.pan
+            .store(p.pan.clamp(-1.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     pub fn load(&self) -> SoundParams {
@@ -170,6 +299,24 @@ impl AtomicSoundParams {
             tremolo_depth: f32::from_bits(self.tremolo_depth.load(Ordering::Relaxed)),
             delay_mix: f32::from_bits(self.delay_mix.load(Ordering::Relaxed)),
             voice_mode: VoiceMode::from_u8(self.voice_mode.load(Ordering::Relaxed)),
+            decay_ms: f32::from_bits(self.decay_ms.load(Ordering::Relaxed)),
+            sustain_level: f32::from_bits(self.sustain_level.load(Ordering::Relaxed)),
+            mod_filter_min_hz: f32::from_bits(self.mod_filter_min_hz.load(Ordering::Relaxed)),
+            mod_filter_max_hz: f32::from_bits(self.mod_filter_max_hz.load(Ordering::Relaxed)),
+            comp_enabled: self.comp_enabled.load(Ordering::Relaxed) != 0,
+            comp_input_db: f32::from_bits(self.comp_input_db.load(Ordering::Relaxed)),
+            comp_attack_ms: f32::from_bits(self.comp_attack_ms.load(Ordering::Relaxed)),
+            comp_release_ms: f32::from_bits(self.comp_release_ms.load(Ordering::Relaxed)),
+            comp_ratio: f32::from_bits(self.comp_ratio.load(Ordering::Relaxed)),
+            comp_threshold_db: f32::from_bits(self.comp_threshold_db.load(Ordering::Relaxed)),
+            comp_mix: f32::from_bits(self.comp_mix.load(Ordering::Relaxed)),
+            comp_output_db: f32::from_bits(self.comp_output_db.load(Ordering::Relaxed)),
+            eq_enabled: self.eq_enabled.load(Ordering::Relaxed) != 0,
+            eq_freqs: std::array::from_fn(|i| f32::from_bits(self.eq_freqs[i].load(Ordering::Relaxed))),
+            eq_gains: std::array::from_fn(|i| f32::from_bits(self.eq_gains[i].load(Ordering::Relaxed))),
+            eq_qs: std::array::from_fn(|i| f32::from_bits(self.eq_qs[i].load(Ordering::Relaxed))),
+            block_sustain: self.block_sustain.load(Ordering::Relaxed) != 0,
+            pan: f32::from_bits(self.pan.load(Ordering::Relaxed)),
         }
     }
 }
@@ -419,6 +566,122 @@ impl Default for Voice {
     }
 }
 
+#[derive(Default, Clone, Copy)]
+struct StereoBiquad {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    x1_l: f32,
+    x2_l: f32,
+    y1_l: f32,
+    y2_l: f32,
+    x1_r: f32,
+    x2_r: f32,
+    y1_r: f32,
+    y2_r: f32,
+}
+
+impl StereoBiquad {
+    fn set_hpf(&mut self, freq_hz: f32, sr: f32) {
+        let w0 = TAU * (freq_hz.clamp(20.0, sr * 0.45) / sr);
+        let alpha = w0.sin() / std::f32::consts::SQRT_2;
+        let cos_w0 = w0.cos();
+        let a0 = 1.0 + alpha;
+        self.b0 = ((1.0 + cos_w0) * 0.5) / a0;
+        self.b1 = -(1.0 + cos_w0) / a0;
+        self.b2 = ((1.0 + cos_w0) * 0.5) / a0;
+        self.a1 = (-2.0 * cos_w0) / a0;
+        self.a2 = (1.0 - alpha) / a0;
+    }
+
+    fn set_lpf(&mut self, freq_hz: f32, sr: f32) {
+        let w0 = TAU * (freq_hz.clamp(20.0, sr * 0.45) / sr);
+        let alpha = w0.sin() / std::f32::consts::SQRT_2;
+        let cos_w0 = w0.cos();
+        let a0 = 1.0 + alpha;
+        self.b0 = ((1.0 - cos_w0) * 0.5) / a0;
+        self.b1 = (1.0 - cos_w0) / a0;
+        self.b2 = ((1.0 - cos_w0) * 0.5) / a0;
+        self.a1 = (-2.0 * cos_w0) / a0;
+        self.a2 = (1.0 - alpha) / a0;
+    }
+
+    fn set_peaking(&mut self, freq_hz: f32, gain_db: f32, bw: f32, sr: f32) {
+        if gain_db.abs() < 0.05 {
+            self.b0 = 1.0;
+            self.b1 = 0.0;
+            self.b2 = 0.0;
+            self.a1 = 0.0;
+            self.a2 = 0.0;
+            return;
+        }
+        let a = 10.0_f32.powf(gain_db / 40.0);
+        let w0 = TAU * (freq_hz.clamp(20.0, sr * 0.45) / sr);
+        let q = (1.0 / bw.clamp(0.1, 4.0)).clamp(0.3, 10.0);
+        let alpha = w0.sin() / (2.0 * q);
+        let cos_w0 = w0.cos();
+        let a0 = 1.0 + alpha / a;
+        self.b0 = (1.0 + alpha * a) / a0;
+        self.b1 = (-2.0 * cos_w0) / a0;
+        self.b2 = (1.0 - alpha * a) / a0;
+        self.a1 = (-2.0 * cos_w0) / a0;
+        self.a2 = (1.0 - alpha / a) / a0;
+    }
+
+    fn set_shelf(&mut self, freq_hz: f32, gain_db: f32, high: bool, sr: f32) {
+        if gain_db.abs() < 0.05 {
+            self.b0 = 1.0;
+            self.b1 = 0.0;
+            self.b2 = 0.0;
+            self.a1 = 0.0;
+            self.a2 = 0.0;
+            return;
+        }
+        let a = 10.0_f32.powf(gain_db / 40.0);
+        let w0 = TAU * (freq_hz.clamp(20.0, sr * 0.45) / sr);
+        let cos_w0 = w0.cos();
+        let sin_w0 = w0.sin();
+        let beta = (a.sqrt() / 0.7071) * sin_w0;
+        if high {
+            let a0 = (a + 1.0) - (a - 1.0) * cos_w0 + beta;
+            self.b0 = (a * ((a + 1.0) + (a - 1.0) * cos_w0 + beta)) / a0;
+            self.b1 = (-2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0)) / a0;
+            self.b2 = (a * ((a + 1.0) + (a - 1.0) * cos_w0 - beta)) / a0;
+            self.a1 = (2.0 * ((a - 1.0) - (a + 1.0) * cos_w0)) / a0;
+            self.a2 = ((a + 1.0) - (a - 1.0) * cos_w0 - beta) / a0;
+        } else {
+            let a0 = (a + 1.0) + (a - 1.0) * cos_w0 + beta;
+            self.b0 = (a * ((a + 1.0) - (a - 1.0) * cos_w0 + beta)) / a0;
+            self.b1 = (2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0)) / a0;
+            self.b2 = (a * ((a + 1.0) - (a - 1.0) * cos_w0 - beta)) / a0;
+            self.a1 = (-2.0 * ((a - 1.0) + (a + 1.0) * cos_w0)) / a0;
+            self.a2 = ((a + 1.0) + (a - 1.0) * cos_w0 - beta) / a0;
+        }
+    }
+
+    #[inline]
+    fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
+        let out_l = self.b0 * l + self.b1 * self.x1_l + self.b2 * self.x2_l
+            - self.a1 * self.y1_l
+            - self.a2 * self.y2_l;
+        self.x2_l = self.x1_l;
+        self.x1_l = l;
+        self.y2_l = self.y1_l;
+        self.y1_l = out_l;
+
+        let out_r = self.b0 * r + self.b1 * self.x1_r + self.b2 * self.x2_r
+            - self.a1 * self.y1_r
+            - self.a2 * self.y2_r;
+        self.x2_r = self.x1_r;
+        self.x1_r = r;
+        self.y2_r = self.y1_r;
+        self.y1_r = out_r;
+        (out_l, out_r)
+    }
+}
+
 /// Fixed-size 32-voice sampler pool with zero heap allocation on the audio thread.
 pub struct VoicePool {
     voices: [Voice; MAX_VOICES],
@@ -437,6 +700,8 @@ pub struct VoicePool {
     svf_band_r: f32,
     bark_lp_l: f32,
     bark_lp_r: f32,
+    comp_env: f32,
+    eq_filters: [StereoBiquad; 8],
     reverb: Box<StereoReverb>,
     chorus: Box<StereoChorus>,
     delay: Box<StereoDelay>,
@@ -461,6 +726,8 @@ impl Default for VoicePool {
             svf_band_r: 0.0,
             bark_lp_l: 0.0,
             bark_lp_r: 0.0,
+            comp_env: 0.0,
+            eq_filters: [StereoBiquad::default(); 8],
             reverb: Box::default(),
             chorus: Box::default(),
             delay: Box::default(),
@@ -635,6 +902,9 @@ impl VoicePool {
                 }
             }
             MidiEvent::SustainPedal { pressed, .. } => {
+                if params.block_sustain && pressed {
+                    return;
+                }
                 self.sustain_pressed = pressed;
                 if !pressed {
                     let step = release_step_for_ms(params.release_ms, sample_rate);
@@ -765,13 +1035,49 @@ impl VoicePool {
             1.0
         };
         let eff_brightness = (params.brightness * hammer_bright).clamp(0.0, 1.0);
-        let use_svf = eff_brightness < 0.995 || params.resonance > 0.01;
+        let mod_filter_active = params.mod_filter_max_hz < 19500.0;
+        let use_svf = eff_brightness < 0.995 || params.resonance > 0.01 || mod_filter_active;
         let svf_f = if use_svf {
-            let cutoff = (600.0 * (30.0_f32).powf(eff_brightness)).min(sample_rate as f32 * 0.42);
+            let base_cutoff = 600.0 * (30.0_f32).powf(eff_brightness);
+            let mod_cutoff = if mod_filter_active {
+                let lo = params.mod_filter_min_hz.min(params.mod_filter_max_hz);
+                let hi = params.mod_filter_min_hz.max(params.mod_filter_max_hz);
+                lo + (hi - lo) * self.mod_wheel
+            } else {
+                base_cutoff
+            };
+            let cutoff = base_cutoff.min(mod_cutoff).min(sample_rate as f32 * 0.42);
             (2.0 * (std::f32::consts::PI * cutoff / sample_rate as f32).sin()).clamp(0.01, 0.85)
         } else {
             0.85
         };
+        let decay_step = if params.sustain_level < 0.999 {
+            release_step_for_ms(params.decay_ms.max(10.0), sample_rate)
+        } else {
+            0.0
+        };
+        let sr_f = sample_rate as f32;
+        if params.eq_enabled {
+            self.eq_filters[0].set_hpf(params.eq_freqs[0], sr_f);
+            self.eq_filters[1].set_shelf(params.eq_freqs[1], params.eq_gains[0], false, sr_f);
+            for p in 0..4 {
+                self.eq_filters[2 + p].set_peaking(
+                    params.eq_freqs[2 + p],
+                    params.eq_gains[1 + p],
+                    params.eq_qs[p],
+                    sr_f,
+                );
+            }
+            self.eq_filters[6].set_shelf(params.eq_freqs[6], params.eq_gains[5], true, sr_f);
+            self.eq_filters[7].set_lpf(params.eq_freqs[7], sr_f);
+        }
+        let comp_in_gain = 10.0_f32.powf(params.comp_input_db / 20.0);
+        let comp_out_gain = 10.0_f32.powf(params.comp_output_db / 20.0);
+        let comp_att_coeff = (-1.0 / (params.comp_attack_ms.max(1.0) * 0.001 * sr_f)).exp();
+        let comp_rel_coeff = (-1.0 / (params.comp_release_ms.max(10.0) * 0.001 * sr_f)).exp();
+        let pan = params.pan.clamp(-1.0, 1.0);
+        let pan_l = (1.0 - pan).min(1.0);
+        let pan_r = (1.0 + pan).min(1.0);
         let svf_q = (1.0 - params.resonance.clamp(0.0, 0.85) * 0.88).clamp(0.12, 1.0);
         let use_bark = params.hammer_hardness > 0.51;
         let bark_amount = ((params.hammer_hardness - 0.5) * 2.0).clamp(0.0, 1.0);
@@ -872,6 +1178,8 @@ impl VoicePool {
                         v.env_gain = 0.0;
                         v.state = VoiceState::Idle;
                     }
+                } else if v.attack_gain >= 1.0 && decay_step > 0.0 && v.env_gain > params.sustain_level {
+                    v.env_gain = (v.env_gain - decay_step).max(params.sustain_level);
                 }
             }
 
@@ -933,6 +1241,38 @@ impl VoicePool {
                 mix_l += wet_l * params.reverb_mix;
                 mix_r += wet_r * params.reverb_mix;
             }
+
+            if params.comp_enabled {
+                let dry_l = mix_l;
+                let dry_r = mix_r;
+                let in_l = mix_l * comp_in_gain;
+                let in_r = mix_r * comp_in_gain;
+                let peak = in_l.abs().max(in_r.abs());
+                let coeff = if peak > self.comp_env { comp_att_coeff } else { comp_rel_coeff };
+                self.comp_env = coeff * self.comp_env + (1.0 - coeff) * peak;
+                let env_db = 20.0 * (self.comp_env.max(1e-6)).log10();
+                let gain_db = if env_db > params.comp_threshold_db {
+                    let over = env_db - params.comp_threshold_db;
+                    -(over * (1.0 - 1.0 / params.comp_ratio.max(1.0)))
+                } else {
+                    0.0
+                };
+                let gr = 10.0_f32.powf(gain_db / 20.0) * comp_out_gain;
+                let wet_l = in_l * gr;
+                let wet_r = in_r * gr;
+                let cmix = params.comp_mix.clamp(0.0, 1.0);
+                mix_l = dry_l * (1.0 - cmix) + wet_l * cmix;
+                mix_r = dry_r * (1.0 - cmix) + wet_r * cmix;
+            }
+
+            if params.eq_enabled {
+                for band in &mut self.eq_filters {
+                    (mix_l, mix_r) = band.process(mix_l, mix_r);
+                }
+            }
+
+            mix_l *= pan_l;
+            mix_r *= pan_r;
 
             let out_l = (mix_l * master_volume).tanh();
             let out_r = (mix_r * master_volume).tanh();

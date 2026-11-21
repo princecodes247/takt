@@ -84,7 +84,56 @@ struct SoundParamsDto {
     tremolo_depth: f32,
     delay_mix: f32,
     voice_mode: String,
+    #[serde(default = "default_decay_ms")]
+    decay_ms: f32,
+    #[serde(default = "default_one")]
+    sustain_level: f32,
+    #[serde(default = "default_mod_min")]
+    mod_filter_min_hz: f32,
+    #[serde(default = "default_mod_max")]
+    mod_filter_max_hz: f32,
+    #[serde(default)]
+    comp_enabled: bool,
+    #[serde(default)]
+    comp_input_db: f32,
+    #[serde(default = "default_comp_attack")]
+    comp_attack_ms: f32,
+    #[serde(default = "default_comp_release")]
+    comp_release_ms: f32,
+    #[serde(default = "default_comp_ratio")]
+    comp_ratio: f32,
+    #[serde(default = "default_comp_thresh")]
+    comp_threshold_db: f32,
+    #[serde(default = "default_comp_mix")]
+    comp_mix: f32,
+    #[serde(default = "default_comp_out")]
+    comp_output_db: f32,
+    #[serde(default)]
+    eq_enabled: bool,
+    #[serde(default = "default_eq_freqs")]
+    eq_freqs: [f32; 8],
+    #[serde(default)]
+    eq_gains: [f32; 6],
+    #[serde(default = "default_eq_qs")]
+    eq_qs: [f32; 4],
+    #[serde(default)]
+    block_sustain: bool,
+    #[serde(default)]
+    pan: f32,
 }
+
+fn default_decay_ms() -> f32 { 10000.0 }
+fn default_one() -> f32 { 1.0 }
+fn default_mod_min() -> f32 { 200.0 }
+fn default_mod_max() -> f32 { 20000.0 }
+fn default_comp_attack() -> f32 { 15.0 }
+fn default_comp_release() -> f32 { 49.0 }
+fn default_comp_ratio() -> f32 { 4.2 }
+fn default_comp_thresh() -> f32 { -29.0 }
+fn default_comp_mix() -> f32 { 0.85 }
+fn default_comp_out() -> f32 { 3.5 }
+fn default_eq_freqs() -> [f32; 8] { [67.0, 200.0, 197.0, 345.0, 1000.0, 5417.0, 1101.0, 9000.0] }
+fn default_eq_qs() -> [f32; 4] { [0.28, 0.30, 0.50, 0.36] }
 
 impl From<SoundParams> for SoundParamsDto {
     fn from(p: SoundParams) -> Self {
@@ -109,6 +158,24 @@ impl From<SoundParams> for SoundParamsDto {
             tremolo_depth: p.tremolo_depth,
             delay_mix: p.delay_mix,
             voice_mode,
+            decay_ms: p.decay_ms,
+            sustain_level: p.sustain_level,
+            mod_filter_min_hz: p.mod_filter_min_hz,
+            mod_filter_max_hz: p.mod_filter_max_hz,
+            comp_enabled: p.comp_enabled,
+            comp_input_db: p.comp_input_db,
+            comp_attack_ms: p.comp_attack_ms,
+            comp_release_ms: p.comp_release_ms,
+            comp_ratio: p.comp_ratio,
+            comp_threshold_db: p.comp_threshold_db,
+            comp_mix: p.comp_mix,
+            comp_output_db: p.comp_output_db,
+            eq_enabled: p.eq_enabled,
+            eq_freqs: p.eq_freqs,
+            eq_gains: p.eq_gains,
+            eq_qs: p.eq_qs,
+            block_sustain: p.block_sustain,
+            pan: p.pan,
         }
     }
 }
@@ -135,6 +202,24 @@ impl From<SoundParamsDto> for SoundParams {
             tremolo_depth: p.tremolo_depth,
             delay_mix: p.delay_mix,
             voice_mode,
+            decay_ms: p.decay_ms,
+            sustain_level: p.sustain_level,
+            mod_filter_min_hz: p.mod_filter_min_hz,
+            mod_filter_max_hz: p.mod_filter_max_hz,
+            comp_enabled: p.comp_enabled,
+            comp_input_db: p.comp_input_db,
+            comp_attack_ms: p.comp_attack_ms,
+            comp_release_ms: p.comp_release_ms,
+            comp_ratio: p.comp_ratio,
+            comp_threshold_db: p.comp_threshold_db,
+            comp_mix: p.comp_mix,
+            comp_output_db: p.comp_output_db,
+            eq_enabled: p.eq_enabled,
+            eq_freqs: p.eq_freqs,
+            eq_gains: p.eq_gains,
+            eq_qs: p.eq_qs,
+            block_sustain: p.block_sustain,
+            pan: p.pan,
         }
     }
 }

@@ -33,6 +33,24 @@ interface SoundParamsDto {
   tremoloDepth: number;
   delayMix: number;
   voiceMode: "poly" | "mono" | "legato";
+  decayMs: number;
+  sustainLevel: number;
+  modFilterMinHz: number;
+  modFilterMaxHz: number;
+  compEnabled: boolean;
+  compInputDb: number;
+  compAttackMs: number;
+  compReleaseMs: number;
+  compRatio: number;
+  compThresholdDb: number;
+  compMix: number;
+  compOutputDb: number;
+  eqEnabled: boolean;
+  eqFreqs: number[];
+  eqGains: number[];
+  eqQs: number[];
+  blockSustain: boolean;
+  pan: number;
 }
 
 interface LayerDto {
@@ -88,6 +106,24 @@ const DEFAULT_SOUND_PARAMS: SoundParamsDto = {
   tremoloDepth: 0.0,
   delayMix: 0.0,
   voiceMode: "poly",
+  decayMs: 10000.0,
+  sustainLevel: 1.0,
+  modFilterMinHz: 200.0,
+  modFilterMaxHz: 20000.0,
+  compEnabled: false,
+  compInputDb: 0.0,
+  compAttackMs: 15.0,
+  compReleaseMs: 49.0,
+  compRatio: 4.2,
+  compThresholdDb: -29.0,
+  compMix: 0.85,
+  compOutputDb: 3.5,
+  eqEnabled: false,
+  eqFreqs: [67, 200, 197, 345, 1000, 5417, 1101, 9000],
+  eqGains: [0, 0, 0, 0, 0, 0],
+  eqQs: [0.28, 0.3, 0.5, 0.36],
+  blockSustain: false,
+  pan: 0.0,
 };
 
 interface InitialStateDto {
@@ -261,6 +297,24 @@ function interpolateSoundParams(
     tremoloDepth: lerp(from.tremoloDepth, to.tremoloDepth, t),
     delayMix: lerp(from.delayMix, to.delayMix, t),
     voiceMode: to.voiceMode,
+    decayMs: lerp(from.decayMs, to.decayMs, t),
+    sustainLevel: lerp(from.sustainLevel, to.sustainLevel, t),
+    modFilterMinHz: lerp(from.modFilterMinHz, to.modFilterMinHz, t),
+    modFilterMaxHz: lerp(from.modFilterMaxHz, to.modFilterMaxHz, t),
+    compEnabled: to.compEnabled,
+    compInputDb: lerp(from.compInputDb, to.compInputDb, t),
+    compAttackMs: lerp(from.compAttackMs, to.compAttackMs, t),
+    compReleaseMs: lerp(from.compReleaseMs, to.compReleaseMs, t),
+    compRatio: lerp(from.compRatio, to.compRatio, t),
+    compThresholdDb: lerp(from.compThresholdDb, to.compThresholdDb, t),
+    compMix: lerp(from.compMix, to.compMix, t),
+    compOutputDb: lerp(from.compOutputDb, to.compOutputDb, t),
+    eqEnabled: to.eqEnabled,
+    eqFreqs: to.eqFreqs.map((v, i) => lerp(from.eqFreqs[i] ?? v, v, t)),
+    eqGains: to.eqGains.map((v, i) => lerp(from.eqGains[i] ?? v, v, t)),
+    eqQs: to.eqQs.map((v, i) => lerp(from.eqQs[i] ?? v, v, t)),
+    blockSustain: to.blockSustain,
+    pan: lerp(from.pan, to.pan, t),
   };
 }
 
@@ -293,6 +347,121 @@ function formatDb(vol: number): string {
   const db = 20 * Math.log10(vol / 0.85);
   if (Math.abs(db) < 0.05) return "0 dB";
   return `${db.toFixed(2)} dB`;
+}
+
+function RotaryKnob({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  displayValue,
+  color = "#93b4f5",
+  size = 54,
+  onChange,
+  onReset,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  displayValue: string;
+  color?: string;
+  size?: number;
+  onChange: (val: number) => void;
+  onReset?: () => void;
+}) {
+  const dragRef = useRef<{ startY: number; startVal: number } | null>(null);
+  const norm = Math.max(0, Math.min(1, (value - min) / (max - min || 1)));
+  const startAngle = -135;
+  const endAngle = 135;
+  const angle = startAngle + norm * (endAngle - startAngle);
+  const r = 20;
+  const cx = 26;
+  const cy = 26;
+
+  const polar = (deg: number) => {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  };
+
+  const arcPath = (fromDeg: number, toDeg: number) => {
+    const p1 = polar(fromDeg);
+    const p2 = polar(toDeg);
+    const large = Math.abs(toDeg - fromDeg) > 180 ? 1 : 0;
+    return `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${large} 1 ${p2.x} ${p2.y}`;
+  };
+
+  const ptrInner = {
+    x: cx + 7 * Math.cos(((angle - 90) * Math.PI) / 180),
+    y: cy + 7 * Math.sin(((angle - 90) * Math.PI) / 180),
+  };
+  const ptrOuter = {
+    x: cx + 14 * Math.cos(((angle - 90) * Math.PI) / 180),
+    y: cy + 14 * Math.sin(((angle - 90) * Math.PI) / 180),
+  };
+
+  return (
+    <div className="sk-knob-wrap">
+      {label && <span className="sk-knob-label">{label}</span>}
+      <div
+        className="sk-knob-dial"
+        style={{ width: size, height: size }}
+        role="slider"
+        tabIndex={0}
+        aria-label={label || displayValue}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          dragRef.current = { startY: e.clientY, startVal: value };
+        }}
+        onPointerMove={(e) => {
+          if (!dragRef.current || e.buttons !== 1) return;
+          const dy = dragRef.current.startY - e.clientY;
+          const raw = dragRef.current.startVal + (dy / 130) * (max - min);
+          const stepped = Math.round(raw / step) * step;
+          onChange(Math.max(min, Math.min(max, Number(stepped.toFixed(4)))));
+        }}
+        onPointerUp={() => {
+          dragRef.current = null;
+        }}
+        onDoubleClick={onReset}
+      >
+        <svg viewBox="0 0 52 52" width={size} height={size}>
+          <path
+            d={arcPath(startAngle, endAngle)}
+            fill="none"
+            stroke="#0e1017"
+            strokeWidth="3.5"
+            strokeLinecap="round"
+          />
+          {norm > 0.005 && (
+            <path
+              d={arcPath(startAngle, angle)}
+              fill="none"
+              stroke={color}
+              strokeWidth="3.5"
+              strokeLinecap="round"
+            />
+          )}
+          <circle cx={cx} cy={cy} r="15.5" fill="#2e3340" stroke="#474e61" strokeWidth="1" />
+          <line
+            x1={ptrInner.x}
+            y1={ptrInner.y}
+            x2={ptrOuter.x}
+            y2={ptrOuter.y}
+            stroke={color}
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
+      <span className="sk-knob-val">{displayValue}</span>
+    </div>
+  );
 }
 
 interface CustomSelectOption {
@@ -618,6 +787,30 @@ export default function App() {
   }, [pickerTarget]);
   // Layer DSP inspector modal: layer index or null
   const [editingLayerIdx, setEditingLayerIdx] = useState<number | null>(null);
+  const [inspectorTab, setInspectorTab] = useState<
+    "adsr" | "modfilter" | "compressor" | "equalizer" | "effects" | "settings"
+  >("compressor");
+  const inspectorSnapshotRef = useRef<{
+    index: number;
+    layer: LayerDto;
+  } | null>(null);
+
+  const openLayerInspector = useCallback(
+    (idx: number) => {
+      setEditingLayerIdx((cur) => {
+        if (cur === idx) return null;
+        const target = status?.layers[idx];
+        if (target) {
+          inspectorSnapshotRef.current = {
+            index: idx,
+            layer: JSON.parse(JSON.stringify(target)),
+          };
+        }
+        return idx;
+      });
+    },
+    [status?.layers]
+  );
   const [patches, setPatches] = useState<Patch[]>(() => {
     try {
       const raw = localStorage.getItem(PATCHES_STORAGE_KEY);
@@ -1055,6 +1248,22 @@ export default function App() {
     },
     [status?.layers, cancelSnapshotAnim]
   );
+
+  const discardInspectorChanges = useCallback(() => {
+    const snap = inspectorSnapshotRef.current;
+    if (snap) {
+      void handleUpdateLayer(snap.index, {
+        enabled: snap.layer.enabled,
+        volume: snap.layer.volume,
+        minNote: snap.layer.minNote,
+        maxNote: snap.layer.maxNote,
+        octaveShift: snap.layer.octaveShift,
+        params: snap.layer.params,
+      });
+    }
+    inspectorSnapshotRef.current = null;
+    setEditingLayerIdx(null);
+  }, [handleUpdateLayer]);
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
@@ -2323,11 +2532,7 @@ export default function App() {
                         <button
                           type="button"
                           className={`sk-tune-btn ${editingLayerIdx === idx ? "active" : ""}`}
-                          onClick={() =>
-                            setEditingLayerIdx((cur) =>
-                              cur === idx ? null : idx
-                            )
-                          }
+                          onClick={() => openLayerInspector(idx)}
                           title="Layer Controls (Tone, Envelope, Key Range)"
                         >
                           <svg
@@ -3188,328 +3393,141 @@ export default function App() {
         </div>
       )}
 
-      {/* Layer Controls Inspector Modal */}
+      {/* Voice Effects & Settings Modal (Sunday Keys 1:1) */}
       {editingLayer && editingLayerIdx !== null && (
         <div
           className="modal-backdrop"
           onClick={() => setEditingLayerIdx(null)}
         >
           <div
-            className="modal-card inspector-card"
+            className="modal-card sk-inspector"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
-            aria-label="Layer Controls"
+            aria-label="Voice Effects"
           >
-            <div className="modal-head">
-              <div className="sound-title-row">
-                <label>{editingLayer.soundName}</label>
-                <span className="active-sound-pill">
-                  Layer {editingLayerIdx + 1} · {editingLayer.category}
-                </span>
-              </div>
-              <div className="modal-head-right">
+            {/* Top Header: Remove Sound | Colored Badge + Voice Name + Edit | Reset */}
+            <div className="sk-insp-header">
+              <button
+                type="button"
+                className="sk-insp-btn"
+                disabled={layers.length <= 1}
+                onClick={() => {
+                  const target = editingLayerIdx;
+                  setEditingLayerIdx(null);
+                  void handleRemoveLayer(target);
+                }}
+              >
+                <span aria-hidden="true">🗑</span>
+                <span>Remove Sound</span>
+              </button>
+
+              <div className="sk-insp-title-wrap">
+                <span
+                  className="sb-module-dot"
+                  style={{
+                    background:
+                      LAYER_COLORS[editingLayerIdx % LAYER_COLORS.length],
+                  }}
+                />
+                <span className="sk-insp-title">{editingLayer.soundName}</span>
                 <button
                   type="button"
-                  className="btn-mini"
-                  onClick={() =>
-                    handleUpdateLayer(editingLayerIdx, {
-                      minNote: 21,
-                      maxNote: 108,
-                      octaveShift: 0,
-                      params: DEFAULT_SOUND_PARAMS,
-                    })
-                  }
+                  className="sk-insp-edit-btn"
+                  title="Change Sound"
+                  onClick={() => {
+                    const target = editingLayerIdx;
+                    setEditingLayerIdx(null);
+                    setPickerTarget(target);
+                  }}
                 >
-                  Reset Layer
-                </button>
-                <button
-                  type="button"
-                  className="btn-mini"
-                  onClick={() => setEditingLayerIdx(null)}
-                >
-                  Done
+                  ✎
                 </button>
               </div>
+
+              <button
+                type="button"
+                className="sk-insp-btn"
+                onClick={() =>
+                  handleUpdateLayer(editingLayerIdx, {
+                    minNote: 21,
+                    maxNote: 108,
+                    octaveShift: 0,
+                    params: DEFAULT_SOUND_PARAMS,
+                  })
+                }
+              >
+                <span aria-hidden="true">↺</span>
+                <span>Reset Defaults</span>
+              </button>
             </div>
 
-            <div className="controls-groups">
-              <div className="control-group mode-group">
-                <div className="group-title">Mode & Range</div>
-                <div className="mode-pills">
-                  {(["poly", "mono", "legato"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`mode-pill ${editingLayer.params.voiceMode === mode ? "active" : ""}`}
-                      onClick={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { voiceMode: mode },
-                        })
-                      }
-                    >
-                      {mode === "poly"
-                        ? "Poly"
-                        : mode === "mono"
-                          ? "Mono"
-                          : "Legato"}
-                    </button>
-                  ))}
-                </div>
-                <ParamSlider
-                  label="Low Key"
-                  displayValue={midiNoteLabel(editingLayer.minNote)}
-                  value={editingLayer.minNote}
-                  min={21}
-                  max={editingLayer.maxNote}
-                  onChange={(v) =>
-                    handleUpdateLayer(editingLayerIdx, { minNote: v })
-                  }
-                  onReset={() =>
-                    handleUpdateLayer(editingLayerIdx, { minNote: 21 })
-                  }
-                />
-                <ParamSlider
-                  label="High Key"
-                  displayValue={midiNoteLabel(editingLayer.maxNote)}
-                  value={editingLayer.maxNote}
-                  min={editingLayer.minNote}
-                  max={108}
-                  onChange={(v) =>
-                    handleUpdateLayer(editingLayerIdx, { maxNote: v })
-                  }
-                  onReset={() =>
-                    handleUpdateLayer(editingLayerIdx, { maxNote: 108 })
-                  }
-                />
-              </div>
+            {/* Segmented Tab Bar */}
+            <div className="sk-insp-tabs" role="tablist">
+              {(
+                [
+                  ["adsr", "ADSR"],
+                  ["modfilter", "Mod Filter"],
+                  ["compressor", "FX A: Compressor"],
+                  ["equalizer", "FX B: Equalizer"],
+                  ["effects", "FX C: Effects & Tone"],
+                  ["settings", "Settings"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={inspectorTab === key}
+                  className={`sk-insp-tab ${inspectorTab === key ? "active" : ""}`}
+                  onClick={() => setInspectorTab(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-              <div className="control-group">
-                <div className="group-title">Tone</div>
-                <div className="group-sliders">
-                  {editingParamsSet.has("hammer") && (
-                    <ParamSlider
-                      label="Hammer"
-                      displayValue={`${Math.round(editingLayer.params.hammerHardness * 100)}%`}
-                      value={Math.round(
-                        editingLayer.params.hammerHardness * 100
-                      )}
-                      min={0}
-                      max={100}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { hammerHardness: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            hammerHardness: DEFAULT_SOUND_PARAMS.hammerHardness,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("brightness") && (
-                    <ParamSlider
-                      label="Tone"
-                      displayValue={`${Math.round(editingLayer.params.brightness * 100)}%`}
-                      value={Math.round(editingLayer.params.brightness * 100)}
-                      min={0}
-                      max={100}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { brightness: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            brightness: DEFAULT_SOUND_PARAMS.brightness,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("resonance") && (
-                    <ParamSlider
-                      label="Resonance"
-                      displayValue={`${Math.round(editingLayer.params.resonance * 100)}%`}
-                      value={Math.round(editingLayer.params.resonance * 100)}
-                      min={0}
-                      max={85}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { resonance: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            resonance: DEFAULT_SOUND_PARAMS.resonance,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("veltrack") && (
-                    <ParamSlider
-                      label="Veltrack"
-                      displayValue={`${Math.round(editingLayer.params.velTrack * 100)}%`}
-                      value={Math.round(editingLayer.params.velTrack * 100)}
-                      min={0}
-                      max={100}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { velTrack: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            velTrack: DEFAULT_SOUND_PARAMS.velTrack,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                </div>
-              </div>
-
-              <div className="control-group">
-                <div className="group-title">Effects & Envelope</div>
-                <div className="group-sliders">
-                  {editingParamsSet.has("chorus") && (
-                    <ParamSlider
-                      label="Chorus"
-                      displayValue={`${Math.round(editingLayer.params.chorusMix * 100)}%`}
-                      value={Math.round(editingLayer.params.chorusMix * 100)}
-                      min={0}
-                      max={100}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { chorusMix: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            chorusMix: DEFAULT_SOUND_PARAMS.chorusMix,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("tremolo") && (
-                    <ParamSlider
-                      label="Tremolo"
-                      displayValue={`${Math.round(editingLayer.params.tremoloDepth * 100)}%`}
-                      value={Math.round(editingLayer.params.tremoloDepth * 100)}
-                      min={0}
-                      max={100}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { tremoloDepth: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            tremoloDepth: DEFAULT_SOUND_PARAMS.tremoloDepth,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("delay") && (
-                    <ParamSlider
-                      label="Delay"
-                      displayValue={`${Math.round(editingLayer.params.delayMix * 100)}%`}
-                      value={Math.round(editingLayer.params.delayMix * 100)}
-                      min={0}
-                      max={60}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { delayMix: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            delayMix: DEFAULT_SOUND_PARAMS.delayMix,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("reverb") && (
-                    <ParamSlider
-                      label="Reverb"
-                      displayValue={`${Math.round(editingLayer.params.reverbMix * 100)}%`}
-                      value={Math.round(editingLayer.params.reverbMix * 100)}
-                      min={0}
-                      max={70}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { reverbMix: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            reverbMix: DEFAULT_SOUND_PARAMS.reverbMix,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("width") && (
-                    <ParamSlider
-                      label="Width"
-                      displayValue={`${Math.round(editingLayer.params.stereoWidth * 100)}%`}
-                      value={Math.round(editingLayer.params.stereoWidth * 100)}
-                      min={0}
-                      max={150}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { stereoWidth: v / 100 },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            stereoWidth: DEFAULT_SOUND_PARAMS.stereoWidth,
-                          },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("glide") && (
-                    <ParamSlider
-                      label="Glide"
-                      displayValue={`${Math.round(editingLayer.params.glideMs)} ms`}
-                      value={Math.round(editingLayer.params.glideMs)}
-                      min={0}
-                      max={400}
-                      step={5}
-                      onChange={(v) =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { glideMs: v },
-                        })
-                      }
-                      onReset={() =>
-                        handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { glideMs: DEFAULT_SOUND_PARAMS.glideMs },
-                        })
-                      }
-                    />
-                  )}
-                  {editingParamsSet.has("attack") && (
-                    <ParamSlider
+            {/* Tab Content */}
+            <div className="sk-insp-body">
+              {inspectorTab === "adsr" && (
+                <div className="sk-adsr-view">
+                  <div className="sk-graph-box">
+                    {(() => {
+                      const p = editingLayer.params;
+                      const attX = 16 + Math.min(180, (p.attackMs / 1000) * 180);
+                      const decX =
+                        attX + Math.min(260, (p.decayMs / 10000) * 260);
+                      const susY = 18 + (1 - p.sustainLevel) * 164;
+                      const relStart = Math.max(decX + 90, 420);
+                      const relX =
+                        relStart +
+                        Math.min(220, (p.releaseMs / 3000) * 220);
+                      const d = `M 16 182 L ${attX} 18 L ${decX} ${susY} L ${relStart} ${susY} L ${relX} 182`;
+                      const area = `${d} L 16 182 Z`;
+                      return (
+                        <svg viewBox="0 0 680 200" className="sk-graph-svg">
+                          <path d={area} fill="rgba(165, 192, 245, 0.14)" />
+                          <path
+                            d={d}
+                            fill="none"
+                            stroke="#b8d0fa"
+                            strokeWidth="2.4"
+                            strokeLinejoin="round"
+                          />
+                          <circle cx={attX} cy={18} r="4.5" fill="#d9e7ff" />
+                          <circle cx={decX} cy={susY} r="4.5" fill="#d9e7ff" />
+                          <circle cx={relX} cy={182} r="4.5" fill="#d9e7ff" />
+                        </svg>
+                      );
+                    })()}
+                  </div>
+                  <div className="sk-adsr-knobs">
+                    <RotaryKnob
                       label="Attack"
-                      displayValue={`${Math.round(editingLayer.params.attackMs)} ms`}
-                      value={Math.round(editingLayer.params.attackMs)}
+                      value={editingLayer.params.attackMs}
                       min={0}
-                      max={300}
+                      max={1000}
+                      step={1}
+                      displayValue={`${editingLayer.params.attackMs.toFixed(1)} ms`}
                       onChange={(v) =>
                         handleUpdateLayer(editingLayerIdx, {
                           paramsPatch: { attackMs: v },
@@ -3517,21 +3535,55 @@ export default function App() {
                       }
                       onReset={() =>
                         handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { attackMs: DEFAULT_SOUND_PARAMS.attackMs },
+                        })
+                      }
+                    />
+                    <RotaryKnob
+                      label="Decay"
+                      value={editingLayer.params.decayMs}
+                      min={10}
+                      max={10000}
+                      step={10}
+                      displayValue={`${Math.round(editingLayer.params.decayMs).toLocaleString()} ms`}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { decayMs: v },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { decayMs: DEFAULT_SOUND_PARAMS.decayMs },
+                        })
+                      }
+                    />
+                    <RotaryKnob
+                      label="Sustain"
+                      value={Math.round(editingLayer.params.sustainLevel * 100)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      displayValue={`${Math.round(editingLayer.params.sustainLevel * 100)} %`}
+                      onChange={(v) =>
+                        handleUpdateLayer(editingLayerIdx, {
+                          paramsPatch: { sustainLevel: v / 100 },
+                        })
+                      }
+                      onReset={() =>
+                        handleUpdateLayer(editingLayerIdx, {
                           paramsPatch: {
-                            attackMs: DEFAULT_SOUND_PARAMS.attackMs,
+                            sustainLevel: DEFAULT_SOUND_PARAMS.sustainLevel,
                           },
                         })
                       }
                     />
-                  )}
-                  {editingParamsSet.has("release") && (
-                    <ParamSlider
+                    <RotaryKnob
                       label="Release"
-                      displayValue={`${Math.round(editingLayer.params.releaseMs)} ms`}
-                      value={Math.round(editingLayer.params.releaseMs)}
+                      value={editingLayer.params.releaseMs}
                       min={20}
-                      max={1200}
+                      max={3000}
                       step={5}
+                      displayValue={`${editingLayer.params.releaseMs.toFixed(1)} ms`}
                       onChange={(v) =>
                         handleUpdateLayer(editingLayerIdx, {
                           paramsPatch: { releaseMs: v },
@@ -3545,29 +3597,882 @@ export default function App() {
                         })
                       }
                     />
-                  )}
-                  {editingParamsSet.has("offset") && (
-                    <ParamSlider
-                      label="Offset"
-                      displayValue={`${Math.round(editingLayer.params.sampleOffsetMs)} ms`}
-                      value={Math.round(editingLayer.params.sampleOffsetMs)}
+                  </div>
+                </div>
+              )}
+
+              {inspectorTab === "modfilter" && (
+                <div className="sk-modfilter-view">
+                  <div className="sk-graph-box">
+                    {(() => {
+                      const p = editingLayer.params;
+                      const toX = (hz: number) =>
+                        24 +
+                        ((Math.log10(Math.max(20, hz)) - Math.log10(20)) /
+                          (Math.log10(20000) - Math.log10(20))) *
+                          620;
+                      const minX = toX(p.modFilterMinHz);
+                      const maxX = toX(p.modFilterMaxHz);
+                      const resY = 82 - p.resonance * 48;
+                      return (
+                        <svg viewBox="0 0 680 200" className="sk-graph-svg">
+                          <line x1="20" y1="50" x2="660" y2="50" stroke="rgba(255,255,255,0.06)" />
+                          <line x1="20" y1="82" x2="660" y2="82" stroke="rgba(255,255,255,0.1)" />
+                          <line x1="20" y1="168" x2="660" y2="168" stroke="rgba(255,255,255,0.08)" />
+                          <path
+                            d={`M 20 82 L ${Math.max(24, minX - 24)} 82 Q ${minX - 6} ${resY} ${minX} 168`}
+                            fill="none"
+                            stroke="#4f75e8"
+                            strokeWidth="2.8"
+                          />
+                          <path
+                            d={`M 20 82 L ${Math.max(24, maxX - 24)} 82 Q ${maxX - 6} ${resY} ${maxX} 168`}
+                            fill="none"
+                            stroke="#cbdcf9"
+                            strokeWidth="2.8"
+                          />
+                        </svg>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="sk-modfilter-controls">
+                    <div className="sk-mod-range-box">
+                      <div className="sk-mod-range-vals">
+                        <span style={{ color: "#60a5fa" }}>
+                          {Math.round(editingLayer.params.modFilterMinHz)} Hz
+                        </span>
+                        <span>
+                          {Math.round(editingLayer.params.modFilterMaxHz)} Hz
+                        </span>
+                      </div>
+                      <div className="sk-mod-sliders">
+                        <span className="sk-muted-lbl">Min</span>
+                        <input
+                          type="range"
+                          min={20}
+                          max={20000}
+                          step={10}
+                          value={editingLayer.params.modFilterMinHz}
+                          onChange={(e) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                modFilterMinHz: Math.min(
+                                  Number(e.target.value),
+                                  editingLayer.params.modFilterMaxHz
+                                ),
+                              },
+                            })
+                          }
+                        />
+                        <input
+                          type="range"
+                          min={20}
+                          max={20000}
+                          step={10}
+                          value={editingLayer.params.modFilterMaxHz}
+                          onChange={(e) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                modFilterMaxHz: Math.max(
+                                  Number(e.target.value),
+                                  editingLayer.params.modFilterMinHz
+                                ),
+                              },
+                            })
+                          }
+                        />
+                        <span className="sk-muted-lbl">Max</span>
+                      </div>
+                    </div>
+
+                    <RotaryKnob
+                      label="Resonance"
+                      value={Math.round(editingLayer.params.resonance * 100)}
                       min={0}
-                      max={40}
+                      max={85}
+                      step={1}
+                      displayValue={`${Math.round(editingLayer.params.resonance * 12)} dB`}
                       onChange={(v) =>
                         handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: { sampleOffsetMs: v },
+                          paramsPatch: { resonance: v / 100 },
                         })
                       }
                       onReset={() =>
                         handleUpdateLayer(editingLayerIdx, {
-                          paramsPatch: {
-                            sampleOffsetMs: DEFAULT_SOUND_PARAMS.sampleOffsetMs,
-                          },
+                          paramsPatch: { resonance: 0 },
                         })
                       }
                     />
-                  )}
+
+                    <div className="sk-info-note">
+                      <span className="sk-info-icon" aria-hidden="true">
+                        i
+                      </span>
+                      <span>
+                        Set up the min/max value and control the low pass filter
+                        with the modulation wheel
+                      </span>
+                    </div>
+                  </div>
                 </div>
+              )}
+
+              {inspectorTab === "compressor" && (
+                <div className="sk-comp-grid">
+                  <div className="sk-comp-col">
+                    <div className="sk-comp-col-title">Input</div>
+                    <div className="sk-comp-fader-wrap">
+                      <span className="sk-muted-lbl">Gain</span>
+                      <input
+                        type="range"
+                        className="v-fader"
+                        style={
+                          {
+                            "--fill": `${((editingLayer.params.compInputDb + 12) / 24) * 100}%`,
+                            "--fader-color": "#93b4f5",
+                          } as React.CSSProperties
+                        }
+                        min={-12}
+                        max={12}
+                        step={0.5}
+                        value={editingLayer.params.compInputDb}
+                        onChange={(e) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compInputDb: Number(e.target.value) },
+                          })
+                        }
+                      />
+                      <span className="sk-knob-val">
+                        {editingLayer.params.compInputDb} dB
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="sk-comp-col">
+                    <div className="sk-comp-col-title">Envelope</div>
+                    <div className="sk-comp-knobs">
+                      <RotaryKnob
+                        label="Attack"
+                        value={editingLayer.params.compAttackMs}
+                        min={1}
+                        max={100}
+                        step={1}
+                        displayValue={`${Math.round(editingLayer.params.compAttackMs)} ms`}
+                        onChange={(v) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compAttackMs: v },
+                          })
+                        }
+                        onReset={() =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compAttackMs: 15 },
+                          })
+                        }
+                      />
+                      <RotaryKnob
+                        label="Release"
+                        value={editingLayer.params.compReleaseMs}
+                        min={10}
+                        max={500}
+                        step={1}
+                        displayValue={`${Math.round(editingLayer.params.compReleaseMs)} ms`}
+                        onChange={(v) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compReleaseMs: v },
+                          })
+                        }
+                        onReset={() =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compReleaseMs: 49 },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="sk-comp-col">
+                    <div className="sk-comp-col-title">Loudness</div>
+                    <div className="sk-comp-knobs">
+                      <RotaryKnob
+                        label="Ratio"
+                        value={editingLayer.params.compRatio}
+                        min={1}
+                        max={20}
+                        step={0.1}
+                        displayValue={`${editingLayer.params.compRatio.toFixed(1)}:1`}
+                        onChange={(v) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compRatio: v },
+                          })
+                        }
+                        onReset={() =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compRatio: 4.2 },
+                          })
+                        }
+                      />
+                      <RotaryKnob
+                        label="Threshold"
+                        value={editingLayer.params.compThresholdDb}
+                        min={-60}
+                        max={0}
+                        step={1}
+                        displayValue={`${Math.round(editingLayer.params.compThresholdDb)} dB`}
+                        onChange={(v) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compThresholdDb: v },
+                          })
+                        }
+                        onReset={() =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { compThresholdDb: -29 },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="sk-comp-col">
+                    <div className="sk-comp-col-title">Mix</div>
+                    <div className="sk-comp-fader-wrap">
+                      <span className="sk-muted-lbl">Dry / Wet</span>
+                      <input
+                        type="range"
+                        className="v-fader"
+                        style={
+                          {
+                            "--fill": `${editingLayer.params.compMix * 100}%`,
+                            "--fader-color": "#93b4f5",
+                          } as React.CSSProperties
+                        }
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={Math.round(editingLayer.params.compMix * 100)}
+                        onChange={(e) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: {
+                              compMix: Number(e.target.value) / 100,
+                            },
+                          })
+                        }
+                      />
+                      <span className="sk-knob-val">
+                        {Math.round(editingLayer.params.compMix * 100)} %
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="sk-comp-col">
+                    <div className="sk-comp-col-title">Output</div>
+                    <div className="sk-comp-fader-wrap">
+                      <span className="sk-muted-lbl">Gain</span>
+                      <input
+                        type="range"
+                        className="v-fader"
+                        style={
+                          {
+                            "--fill": `${((editingLayer.params.compOutputDb + 12) / 24) * 100}%`,
+                            "--fader-color": "#93b4f5",
+                          } as React.CSSProperties
+                        }
+                        min={-12}
+                        max={12}
+                        step={0.5}
+                        value={editingLayer.params.compOutputDb}
+                        onChange={(e) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: {
+                              compOutputDb: Number(e.target.value),
+                            },
+                          })
+                        }
+                      />
+                      <span className="sk-knob-val">
+                        {editingLayer.params.compOutputDb} dB
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {inspectorTab === "equalizer" && (
+                <div className="sk-eq-grid">
+                  {[
+                    { idx: 0, color: "#f472b6", icon: "⟋", gainIdx: null, qIdx: null },
+                    { idx: 1, color: "#c084fc", icon: "⊐", gainIdx: 0, qIdx: null },
+                    { idx: 2, color: "#818cf8", icon: "✦", gainIdx: 1, qIdx: 0 },
+                    { idx: 3, color: "#38bdf8", icon: "✦", gainIdx: 2, qIdx: 1 },
+                    { idx: 4, color: "#4ade80", icon: "✦", gainIdx: 3, qIdx: 2 },
+                    { idx: 5, color: "#a3e635", icon: "✦", gainIdx: 4, qIdx: 3 },
+                    { idx: 6, color: "#fb923c", icon: "⊏", gainIdx: 5, qIdx: null },
+                    { idx: 7, color: "#f87171", icon: "⟍", gainIdx: null, qIdx: null },
+                  ].map((band) => {
+                    const freq = editingLayer.params.eqFreqs[band.idx] ?? 1000;
+                    const gain =
+                      band.gainIdx !== null
+                        ? (editingLayer.params.eqGains[band.gainIdx] ?? 0)
+                        : null;
+                    const bw =
+                      band.qIdx !== null
+                        ? (editingLayer.params.eqQs[band.qIdx] ?? 0.5)
+                        : null;
+                    return (
+                      <div key={band.idx} className="sk-eq-col">
+                        <div
+                          className="sk-eq-head"
+                          style={{ color: band.color }}
+                        >
+                          {band.icon}
+                        </div>
+                        <div className="sk-eq-knobs">
+                          <RotaryKnob
+                            label="Frequency"
+                            color={band.color}
+                            size={44}
+                            value={freq}
+                            min={20}
+                            max={20000}
+                            step={10}
+                            displayValue={`${Math.round(freq).toLocaleString()} Hz`}
+                            onChange={(v) => {
+                              const next = [...editingLayer.params.eqFreqs];
+                              next[band.idx] = v;
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { eqFreqs: next },
+                              });
+                            }}
+                          />
+                          {gain !== null && band.gainIdx !== null && (
+                            <RotaryKnob
+                              label="Gain"
+                              color={band.color}
+                              size={44}
+                              value={gain}
+                              min={-18}
+                              max={18}
+                              step={0.5}
+                              displayValue={`${gain} dB`}
+                              onChange={(v) => {
+                                const next = [...editingLayer.params.eqGains];
+                                next[band.gainIdx!] = v;
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { eqGains: next },
+                                });
+                              }}
+                              onReset={() => {
+                                const next = [...editingLayer.params.eqGains];
+                                next[band.gainIdx!] = 0;
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { eqGains: next },
+                                });
+                              }}
+                            />
+                          )}
+                          {bw !== null && band.qIdx !== null && (
+                            <RotaryKnob
+                              label="Bandwidth"
+                              color={band.color}
+                              size={44}
+                              value={bw}
+                              min={0.1}
+                              max={2.0}
+                              step={0.02}
+                              displayValue={bw.toFixed(2)}
+                              onChange={(v) => {
+                                const next = [...editingLayer.params.eqQs];
+                                next[band.qIdx!] = v;
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { eqQs: next },
+                                });
+                              }}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {inspectorTab === "effects" && (
+                <div className="sk-effects-tab">
+                  <div className="control-group">
+                    <div className="group-title">Tone & Touch</div>
+                    <div className="group-sliders">
+                      {editingParamsSet.has("hammer") && (
+                        <ParamSlider
+                          label="Hammer"
+                          displayValue={`${Math.round(editingLayer.params.hammerHardness * 100)}%`}
+                          value={Math.round(
+                            editingLayer.params.hammerHardness * 100
+                          )}
+                          min={0}
+                          max={100}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { hammerHardness: v / 100 },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                hammerHardness:
+                                  DEFAULT_SOUND_PARAMS.hammerHardness,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                      {editingParamsSet.has("brightness") && (
+                        <ParamSlider
+                          label="Tone"
+                          displayValue={`${Math.round(editingLayer.params.brightness * 100)}%`}
+                          value={Math.round(
+                            editingLayer.params.brightness * 100
+                          )}
+                          min={0}
+                          max={100}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { brightness: v / 100 },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                brightness: DEFAULT_SOUND_PARAMS.brightness,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                      {editingParamsSet.has("veltrack") && (
+                        <ParamSlider
+                          label="Veltrack"
+                          displayValue={`${Math.round(editingLayer.params.velTrack * 100)}%`}
+                          value={Math.round(editingLayer.params.velTrack * 100)}
+                          min={0}
+                          max={100}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { velTrack: v / 100 },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                velTrack: DEFAULT_SOUND_PARAMS.velTrack,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                      {editingParamsSet.has("offset") && (
+                        <ParamSlider
+                          label="Offset"
+                          displayValue={`${Math.round(editingLayer.params.sampleOffsetMs)} ms`}
+                          value={Math.round(editingLayer.params.sampleOffsetMs)}
+                          min={0}
+                          max={40}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { sampleOffsetMs: v },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                sampleOffsetMs:
+                                  DEFAULT_SOUND_PARAMS.sampleOffsetMs,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                      {editingParamsSet.has("glide") && (
+                        <ParamSlider
+                          label="Glide"
+                          displayValue={`${Math.round(editingLayer.params.glideMs)} ms`}
+                          value={Math.round(editingLayer.params.glideMs)}
+                          min={0}
+                          max={400}
+                          step={5}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { glideMs: v },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                glideMs: DEFAULT_SOUND_PARAMS.glideMs,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="control-group">
+                    <div className="group-title">Modulation & Space</div>
+                    <div className="group-sliders">
+                      {editingParamsSet.has("chorus") && (
+                        <ParamSlider
+                          label="Chorus"
+                          displayValue={`${Math.round(editingLayer.params.chorusMix * 100)}%`}
+                          value={Math.round(editingLayer.params.chorusMix * 100)}
+                          min={0}
+                          max={100}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { chorusMix: v / 100 },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                chorusMix: DEFAULT_SOUND_PARAMS.chorusMix,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                      {editingParamsSet.has("tremolo") && (
+                        <ParamSlider
+                          label="Tremolo"
+                          displayValue={`${Math.round(editingLayer.params.tremoloDepth * 100)}%`}
+                          value={Math.round(
+                            editingLayer.params.tremoloDepth * 100
+                          )}
+                          min={0}
+                          max={100}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { tremoloDepth: v / 100 },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                tremoloDepth: DEFAULT_SOUND_PARAMS.tremoloDepth,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                      {editingParamsSet.has("delay") && (
+                        <ParamSlider
+                          label="Delay"
+                          displayValue={`${Math.round(editingLayer.params.delayMix * 100)}%`}
+                          value={Math.round(editingLayer.params.delayMix * 100)}
+                          min={0}
+                          max={60}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { delayMix: v / 100 },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                delayMix: DEFAULT_SOUND_PARAMS.delayMix,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                      {editingParamsSet.has("reverb") && (
+                        <ParamSlider
+                          label="Reverb"
+                          displayValue={`${Math.round(editingLayer.params.reverbMix * 100)}%`}
+                          value={Math.round(editingLayer.params.reverbMix * 100)}
+                          min={0}
+                          max={70}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { reverbMix: v / 100 },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                reverbMix: DEFAULT_SOUND_PARAMS.reverbMix,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                      {editingParamsSet.has("width") && (
+                        <ParamSlider
+                          label="Width"
+                          displayValue={`${Math.round(editingLayer.params.stereoWidth * 100)}%`}
+                          value={Math.round(
+                            editingLayer.params.stereoWidth * 100
+                          )}
+                          min={0}
+                          max={150}
+                          onChange={(v) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: { stereoWidth: v / 100 },
+                            })
+                          }
+                          onReset={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              paramsPatch: {
+                                stereoWidth: DEFAULT_SOUND_PARAMS.stereoWidth,
+                              },
+                            })
+                          }
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {inspectorTab === "settings" && (
+                <div className="sk-settings-grid">
+                  <div className="sk-settings-left">
+                    <div className="sk-setting-card">
+                      <div>
+                        <div className="sk-setting-title">Block Sustain</div>
+                        <div className="sk-setting-sub">
+                          Make the Sound ignore the Sustain Pedal
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={editingLayer.params.blockSustain}
+                        className={`sk-switch ${editingLayer.params.blockSustain ? "on" : ""}`}
+                        onClick={() =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: {
+                              blockSustain: !editingLayer.params.blockSustain,
+                            },
+                          })
+                        }
+                      >
+                        <span className="sk-switch-thumb" />
+                      </button>
+                    </div>
+
+                    <div className="sk-setting-card">
+                      <div>
+                        <div className="sk-setting-title">
+                          MIDI Input Octave
+                        </div>
+                        <div className="sk-setting-sub">
+                          Shift MIDI notes up or down in octaves
+                        </div>
+                      </div>
+                      <div className="sk-stepper">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              octaveShift: Math.max(
+                                -3,
+                                editingLayer.octaveShift - 1
+                              ),
+                            })
+                          }
+                        >
+                          −
+                        </button>
+                        <span>{editingLayer.octaveShift}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              octaveShift: Math.min(
+                                3,
+                                editingLayer.octaveShift + 1
+                              ),
+                            })
+                          }
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="sk-setting-card">
+                      <div>
+                        <div className="sk-setting-title">Voice Mode</div>
+                        <div className="sk-setting-sub">
+                          Polyphonic, Monophonic, or Legato triggering
+                        </div>
+                      </div>
+                      <div className="mode-pills">
+                        {(["poly", "mono", "legato"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            className={`mode-pill ${editingLayer.params.voiceMode === mode ? "active" : ""}`}
+                            onClick={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { voiceMode: mode },
+                              })
+                            }
+                          >
+                            {mode === "poly"
+                              ? "Poly"
+                              : mode === "mono"
+                                ? "Mono"
+                                : "Legato"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="sk-setting-card">
+                      <div>
+                        <div className="sk-setting-title">Key Range</div>
+                        <div className="sk-setting-sub">
+                          {midiNoteLabel(editingLayer.minNote)} –{" "}
+                          {midiNoteLabel(editingLayer.maxNote)}
+                        </div>
+                      </div>
+                      <div className="sk-range-pair">
+                        <input
+                          type="range"
+                          min={21}
+                          max={editingLayer.maxNote}
+                          value={editingLayer.minNote}
+                          onChange={(e) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              minNote: Number(e.target.value),
+                            })
+                          }
+                        />
+                        <input
+                          type="range"
+                          min={editingLayer.minNote}
+                          max={108}
+                          value={editingLayer.maxNote}
+                          onChange={(e) =>
+                            handleUpdateLayer(editingLayerIdx, {
+                              maxNote: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="sk-settings-right">
+                    <div className="sk-setting-side-card">
+                      <div className="sk-setting-title">Sampler Vol</div>
+                      <RotaryKnob
+                        label=""
+                        value={Math.round(editingLayer.volume * 100)}
+                        min={0}
+                        max={125}
+                        step={1}
+                        displayValue={formatDb(editingLayer.volume)}
+                        onChange={(v) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            volume: v / 100,
+                          })
+                        }
+                        onReset={() =>
+                          handleUpdateLayer(editingLayerIdx, { volume: 0.85 })
+                        }
+                      />
+                    </div>
+
+                    <div className="sk-setting-side-card">
+                      <div className="sk-setting-title">Audio Output</div>
+                      <RotaryKnob
+                        label="Pan"
+                        value={Math.round(editingLayer.params.pan * 100)}
+                        min={-100}
+                        max={100}
+                        step={1}
+                        displayValue={
+                          Math.abs(editingLayer.params.pan) < 0.02
+                            ? "0"
+                            : editingLayer.params.pan < 0
+                              ? `L${Math.round(-editingLayer.params.pan * 50)}`
+                              : `R${Math.round(editingLayer.params.pan * 50)}`
+                        }
+                        onChange={(v) =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { pan: v / 100 },
+                          })
+                        }
+                        onReset={() =>
+                          handleUpdateLayer(editingLayerIdx, {
+                            paramsPatch: { pan: 0 },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Footer */}
+            <div className="sk-insp-footer">
+              <div className="sk-insp-footer-left">
+                {(inspectorTab === "compressor" ||
+                  inspectorTab === "equalizer") && (
+                  <button
+                    type="button"
+                    className={`sk-fx-pwr-btn ${(inspectorTab === "compressor" ? editingLayer.params.compEnabled : editingLayer.params.eqEnabled) ? "on" : ""}`}
+                    onClick={() =>
+                      handleUpdateLayer(
+                        editingLayerIdx,
+                        inspectorTab === "compressor"
+                          ? {
+                              paramsPatch: {
+                                compEnabled: !editingLayer.params.compEnabled,
+                              },
+                            }
+                          : {
+                              paramsPatch: {
+                                eqEnabled: !editingLayer.params.eqEnabled,
+                              },
+                            }
+                      )
+                    }
+                  >
+                    <span className="sk-fx-pwr-icon">⏻</span>
+                    <span>
+                      {(
+                        inspectorTab === "compressor"
+                          ? editingLayer.params.compEnabled
+                          : editingLayer.params.eqEnabled
+                      )
+                        ? "Effect ON"
+                        : "Effect OFF"}
+                    </span>
+                  </button>
+                )}
+              </div>
+              <div className="sk-insp-footer-right">
+                <button
+                  type="button"
+                  className="sb-btn-cancel"
+                  onClick={discardInspectorChanges}
+                >
+                  Discard Changes
+                </button>
+                <button
+                  type="button"
+                  className="sb-btn-confirm"
+                  onClick={() => {
+                    inspectorSnapshotRef.current = null;
+                    setEditingLayerIdx(null);
+                  }}
+                >
+                  Confirm
+                </button>
               </div>
             </div>
           </div>
