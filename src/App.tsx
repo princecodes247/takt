@@ -3137,15 +3137,28 @@ export default function App() {
                 <div className="snapshots-actions">
                   <button
                     type="button"
-                    className="snap-action-btn"
+                    className="snap-action-btn snap-icon-btn"
                     onClick={handleAddSnapshot}
+                    aria-label="Add Snapshot"
                     title="Add new Snapshot from current state"
                   >
-                    + Snap
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                    >
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
                   </button>
                   <button
                     type="button"
-                    className="snap-action-btn snap-save-btn"
+                    className="snap-action-btn snap-icon-btn snap-save-btn"
                     onClick={handleSaveCurrentSnapshot}
                     aria-label="Save Snapshot"
                     title="Save current layer levels/effects into active Snapshot"
@@ -3173,31 +3186,29 @@ export default function App() {
         </div>
       )}
 
-      {/* Bottom: Colored Layer Zone Bars + Compact 88-Key Piano */}
+      {/* Bottom: Refined Keyboard Deck (Controls + Interactive Layer Zones + 3D 88-Key Piano) */}
       {!setupOpen && (
         <footer className="piano-footer">
           <div className="keyboard-header">
-            <div className="keyboard-title-group">
-              <label>Keyboard</label>
-              <span className="keyboard-hint">
-                {keyboardEnabled ? "Z/X octave · A–' play" : "Keys off"}
-              </span>
-            </div>
-
-            {chordDetectEnabled && (
-              <div className="chord-readout-wrap" aria-live="polite">
-                <span className="chord-label">CHORD</span>
-                <div className={`chord-badge ${detectedChord ? "active" : ""}`}>
-                  {detectedChord ?? "—"}
+            <div className="keyboard-left-group">
+              {chordDetectEnabled && (
+                <div className="chord-readout-wrap" aria-live="polite">
+                  <span className="chord-label">Chord</span>
+                  <div className={`chord-badge ${detectedChord ? "active" : ""}`}>
+                    {detectedChord ?? "—"}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+              {keyboardEnabled && (
+                <span className="keyboard-hint">Z/X octave · A–&apos; play</span>
+              )}
+            </div>
 
             <div className="keyboard-controls">
               <button
                 type="button"
                 aria-pressed={Boolean(status?.sustainActive)}
-                className={`toggle-pill sustain-pill ${status?.sustainActive ? "on" : ""}`}
+                className={`kb-pill sustain-pill ${status?.sustainActive ? "on" : ""}`}
                 title="Toggle Sustain (CC 64) · also lights up when sustain pedal is stepped on"
                 onClick={() => {
                   const next = !status?.sustainActive;
@@ -3207,27 +3218,59 @@ export default function App() {
                   void invoke("set_sustain", { pressed: next });
                 }}
               >
-                <span className="toggle-dot" aria-hidden="true" />
-                <span>SUSTAIN</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="7" y="3" width="10" height="18" rx="3" />
+                  <circle cx="12" cy="15" r="2" />
+                </svg>
+                <span>Sustain</span>
               </button>
 
               <button
                 type="button"
                 role="switch"
                 aria-checked={chordDetectEnabled}
-                className={`toggle-pill ${chordDetectEnabled ? "on" : ""}`}
+                className={`kb-pill ${chordDetectEnabled ? "on" : ""}`}
+                title="Toggle live Chord Detection"
                 onClick={() => setChordDetectEnabled((v) => !v)}
               >
-                <span className="toggle-dot" aria-hidden="true" />
-                <span>CHORD</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="16" r="3" />
+                </svg>
+                <span>Chord</span>
               </button>
 
-              <div className="octave-stepper">
+              <div
+                className={`octave-stepper ${keyboardEnabled ? "" : "dimmed"}`}
+                title="Computer keyboard octave (Z / X)"
+              >
                 <button
                   type="button"
                   className="step-btn"
                   onClick={() => setOctave((o) => Math.max(0, o - 1))}
-                  disabled={octave <= 0}
+                  disabled={!keyboardEnabled || octave <= 0}
+                  aria-label="Octave Down"
                 >
                   −
                 </button>
@@ -3236,7 +3279,8 @@ export default function App() {
                   type="button"
                   className="step-btn"
                   onClick={() => setOctave((o) => Math.min(7, o + 1))}
-                  disabled={octave >= 7}
+                  disabled={!keyboardEnabled || octave >= 7}
+                  aria-label="Octave Up"
                 >
                   +
                 </button>
@@ -3246,17 +3290,67 @@ export default function App() {
                 type="button"
                 role="switch"
                 aria-checked={keyboardEnabled}
-                className={`toggle-pill ${keyboardEnabled ? "on" : ""}`}
+                className={`kb-pill ${keyboardEnabled ? "on" : ""}`}
+                title="Toggle computer QWERTY keyboard playback"
                 onClick={() => setKeyboardEnabled((v) => !v)}
               >
-                <span className="toggle-dot" aria-hidden="true" />
-                <span>{keyboardEnabled ? "KEYS ON" : "KEYS OFF"}</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="2" y="6" width="20" height="12" rx="2" />
+                  <line x1="6" y1="10" x2="6.01" y2="10" />
+                  <line x1="10" y1="10" x2="10.01" y2="10" />
+                  <line x1="14" y1="10" x2="14.01" y2="10" />
+                  <line x1="18" y1="10" x2="18.01" y2="10" />
+                  <line x1="8" y1="14" x2="16" y2="14" />
+                </svg>
+                <span>{keyboardEnabled ? "Keys" : "Keys Off"}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`kb-pill kb-icon-only ${zonesView ? "on" : ""}`}
+                title="Edit Layer Key Ranges"
+                aria-label="Edit Layer Key Ranges"
+                onClick={() => setZonesView((v) => !v)}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <line x1="3" y1="7" x2="21" y2="7" />
+                  <line x1="6" y1="12" x2="18" y2="12" />
+                  <line x1="4" y1="17" x2="16" y2="17" />
+                </svg>
               </button>
             </div>
           </div>
 
-          {/* Colored Layer Key-Range Bars (Sunday Keys style) */}
-          <div className="zone-bars" aria-hidden="true">
+          {/* Interactive Colored Layer Key-Range Bars */}
+          <div
+            className="zone-bars"
+            role="button"
+            tabIndex={0}
+            title="Click to edit layer key ranges"
+            onClick={() => setZonesView(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") setZonesView(true);
+            }}
+          >
             {layers.map((layer, idx) => {
               const color = LAYER_COLORS[idx % LAYER_COLORS.length];
               const leftPct = ((layer.minNote - 21) / 87) * 100;
@@ -3265,7 +3359,11 @@ export default function App() {
                 ((layer.maxNote - layer.minNote) / 87) * 100
               );
               return (
-                <div key={`zone-${idx}`} className="zone-track">
+                <div
+                  key={`zone-${idx}`}
+                  className="zone-track"
+                  title={`${layer.soundName} · ${midiNoteLabel(layer.minNote)}–${midiNoteLabel(layer.maxNote)}`}
+                >
                   <div
                     className={`zone-fill ${layer.enabled ? "" : "muted"}`}
                     style={{
@@ -3280,6 +3378,7 @@ export default function App() {
           </div>
 
           <div className="mini-piano" aria-label="88-Key Piano">
+            <div className="piano-felt-strip" aria-hidden="true" />
             <div className="white-keys">
               {WHITE_KEYS.map((key) => {
                 const midiActive = activeMidiNotes.has(key.note);
@@ -3290,12 +3389,13 @@ export default function App() {
                 const qwertyLabel = keyboardEnabled
                   ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
                   : undefined;
+                const isMiddleC = key.note === 60;
                 return (
                   <button
                     key={key.note}
                     type="button"
                     tabIndex={-1}
-                    className={`piano-key white ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""}`}
+                    className={`piano-key white ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""} ${isMiddleC ? "middle-c" : ""}`}
                     onPointerDown={(e) => {
                       e.preventDefault();
                       mousePressedRef.current = true;
@@ -3310,7 +3410,8 @@ export default function App() {
                     {qwertyLabel && (
                       <span className="key-cap">{qwertyLabel}</span>
                     )}
-                    {key.cLabel && (
+                    {isMiddleC && <span className="middle-c-dot" aria-hidden="true" />}
+                    {key.cLabel && !qwertyLabel && (
                       <span className="octave-mark">{key.cLabel}</span>
                     )}
                   </button>
