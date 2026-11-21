@@ -2216,10 +2216,10 @@ export default function App() {
           <aside className="stage-sidebar">
             <section className="sidebar-card favorites-card">
               <div className="sidebar-card-head">
-                <label>Patches</label>
+                <span className="sidebar-title">Patches</span>
                 <button
                   type="button"
-                  className="btn-mini active"
+                  className="sidebar-new-btn"
                   onClick={handleCreatePatch}
                   title="Save current layers as a new Patch"
                 >
@@ -2266,7 +2266,7 @@ export default function App() {
               <div className="patch-nav-row">
                 <button
                   type="button"
-                  className="btn-mini"
+                  className="patch-nav-btn"
                   disabled={patches.length <= 1 || loadingTarget !== null}
                   onClick={() => {
                     const cur = patches.findIndex(
@@ -2277,11 +2277,11 @@ export default function App() {
                     handleLoadPatch(patches[prev], 0);
                   }}
                 >
-                  Prev
+                  ‹ Prev
                 </button>
                 <button
                   type="button"
-                  className="btn-mini"
+                  className="patch-nav-btn"
                   disabled={patches.length <= 1 || loadingTarget !== null}
                   onClick={() => {
                     const cur = patches.findIndex(
@@ -2291,7 +2291,7 @@ export default function App() {
                     handleLoadPatch(patches[next], 0);
                   }}
                 >
-                  Next
+                  Next ›
                 </button>
               </div>
             </section>
@@ -2331,11 +2331,15 @@ export default function App() {
                       type="button"
                       role="switch"
                       aria-checked={status?.worshipPadEnabled ?? false}
-                      className={`toggle-pill ${status?.worshipPadEnabled ? "on" : ""}`}
+                      className={`pad-pwr-btn ${status?.worshipPadEnabled ? "on" : ""}`}
                       onClick={handleWorshipPadToggle}
                     >
-                      <span className="toggle-dot" aria-hidden="true" />
-                      <span>{status?.worshipPadEnabled ? "PAD ON" : "PAD OFF"}</span>
+                      <span className="pad-pwr-icon" aria-hidden="true">
+                        ⏻
+                      </span>
+                      <span>
+                        {status?.worshipPadEnabled ? "Pad ON" : "Pad OFF"}
+                      </span>
                     </button>
                     <span className="vol-readout">{padVolPct}%</span>
                   </div>
@@ -2363,25 +2367,52 @@ export default function App() {
                         );
                       })}
                     </div>
-                    <div className="v-fader-wrap">
-                      <input
-                        type="range"
-                        className="v-fader"
-                        style={
-                          {
-                            "--fill": `${(padVolPct / 125) * 100}%`,
-                            "--fader-color": "#93c5fd",
-                          } as React.CSSProperties
+                    <div
+                      className="sk-fader compact"
+                      style={{ "--layer-color": "#89a8f0" } as React.CSSProperties}
+                      role="slider"
+                      tabIndex={0}
+                      aria-label="Worship Pad Volume"
+                      aria-valuemin={0}
+                      aria-valuemax={125}
+                      aria-valuenow={padVolPct}
+                      onPointerDown={(e) => {
+                        if (e.detail >= 2) {
+                          handleWorshipPadVolume(55);
+                          return;
                         }
-                        aria-label="Worship Pad Volume"
-                        min={0}
-                        max={125}
-                        value={padVolPct}
-                        onChange={(e) =>
-                          handleWorshipPadVolume(Number(e.target.value))
-                        }
-                        onDoubleClick={() => handleWorshipPadVolume(55)}
-                      />
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const ratio = 1 - (e.clientY - rect.top) / rect.height;
+                        handleWorshipPadVolume(
+                          Math.round(Math.max(0, Math.min(1, ratio)) * 125)
+                        );
+                      }}
+                      onPointerMove={(e) => {
+                        if (e.buttons !== 1) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const ratio = 1 - (e.clientY - rect.top) / rect.height;
+                        handleWorshipPadVolume(
+                          Math.round(Math.max(0, Math.min(1, ratio)) * 125)
+                        );
+                      }}
+                      onDoubleClick={() => handleWorshipPadVolume(55)}
+                    >
+                      <div className="sk-fader-groove" aria-hidden="true">
+                        <div
+                          className="sk-fader-glow"
+                          style={{ height: `${(padVolPct / 125) * 100}%` }}
+                        />
+                      </div>
+                      <div
+                        className="sk-fader-thumb"
+                        style={{
+                          bottom: `calc(${(padVolPct / 125) * 100}% - 10px)`,
+                        }}
+                        aria-hidden="true"
+                      >
+                        <span className="sk-fader-led" />
+                      </div>
                     </div>
                   </div>
                 </div>
