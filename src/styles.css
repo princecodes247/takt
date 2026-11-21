@@ -46,6 +46,24 @@ select {
   -webkit-user-select: text;
 }
 
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.42);
+}
+
 #root {
   height: 100vh;
   display: flex;
@@ -913,7 +931,8 @@ input[type="range"].sk-seek-bar::-webkit-slider-thumb {
   gap: 10px;
   width: 100%;
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding-bottom: 10px;
+  scrollbar-gutter: stable;
 }
 
 .layer-strip {
@@ -3169,6 +3188,8 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-right: 12px;
+  scrollbar-gutter: stable;
 }
 
 .zone-editor-row {
