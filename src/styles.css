@@ -917,8 +917,8 @@ input[type="range"].sk-seek-bar::-webkit-slider-thumb {
 }
 
 .layer-strip {
-  flex: 1 0 178px;
-  max-width: 230px;
+  flex: 1 0 215px;
+  max-width: 280px;
   background:
     radial-gradient(
       ellipse 90% 48% at 50% 96%,
@@ -1289,8 +1289,8 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 }
 
 .add-layer-slot {
-  flex: 1 0 160px;
-  max-width: 210px;
+  flex: 1 0 195px;
+  max-width: 260px;
   background: rgba(20, 23, 31, 0.55);
   border: 1px dashed rgba(255, 255, 255, 0.18);
   border-radius: 10px;
@@ -1749,16 +1749,16 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 .zone-bars {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   cursor: pointer;
   padding: 2px 0;
 }
 
 .zone-track {
   position: relative;
-  height: 6px;
+  height: 12px;
   background: rgba(255, 255, 255, 0.04);
-  border-radius: 3px;
+  border-radius: 5px;
   overflow: hidden;
 }
 
@@ -1766,7 +1766,7 @@ input[type="range"].v-fader::-webkit-slider-thumb {
   position: absolute;
   top: 0;
   bottom: 0;
-  border-radius: 3px;
+  border-radius: 5px;
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.35);
 }
 
