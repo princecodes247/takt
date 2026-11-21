@@ -3997,239 +3997,278 @@ export default function App() {
               )}
 
               {inspectorTab === "effects" && (
-                <div className="sk-effects-tab">
-                  <div className="control-group">
-                    <div className="group-title">Tone & Touch</div>
-                    <div className="group-sliders">
-                      {editingParamsSet.has("hammer") && (
-                        <ParamSlider
-                          label="Hammer"
-                          displayValue={`${Math.round(editingLayer.params.hammerHardness * 100)}%`}
-                          value={Math.round(
-                            editingLayer.params.hammerHardness * 100
-                          )}
-                          min={0}
-                          max={100}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { hammerHardness: v / 100 },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                hammerHardness:
-                                  DEFAULT_SOUND_PARAMS.hammerHardness,
-                              },
-                            })
-                          }
-                        />
-                      )}
-                      {editingParamsSet.has("brightness") && (
-                        <ParamSlider
-                          label="Tone"
-                          displayValue={`${Math.round(editingLayer.params.brightness * 100)}%`}
-                          value={Math.round(
-                            editingLayer.params.brightness * 100
-                          )}
-                          min={0}
-                          max={100}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { brightness: v / 100 },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                brightness: DEFAULT_SOUND_PARAMS.brightness,
-                              },
-                            })
-                          }
-                        />
-                      )}
-                      {editingParamsSet.has("veltrack") && (
-                        <ParamSlider
-                          label="Veltrack"
-                          displayValue={`${Math.round(editingLayer.params.velTrack * 100)}%`}
-                          value={Math.round(editingLayer.params.velTrack * 100)}
-                          min={0}
-                          max={100}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { velTrack: v / 100 },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                velTrack: DEFAULT_SOUND_PARAMS.velTrack,
-                              },
-                            })
-                          }
-                        />
-                      )}
-                      {editingParamsSet.has("offset") && (
-                        <ParamSlider
-                          label="Offset"
-                          displayValue={`${Math.round(editingLayer.params.sampleOffsetMs)} ms`}
-                          value={Math.round(editingLayer.params.sampleOffsetMs)}
-                          min={0}
-                          max={40}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { sampleOffsetMs: v },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                sampleOffsetMs:
-                                  DEFAULT_SOUND_PARAMS.sampleOffsetMs,
-                              },
-                            })
-                          }
-                        />
-                      )}
-                      {editingParamsSet.has("glide") && (
-                        <ParamSlider
-                          label="Glide"
-                          displayValue={`${Math.round(editingLayer.params.glideMs)} ms`}
-                          value={Math.round(editingLayer.params.glideMs)}
-                          min={0}
-                          max={400}
-                          step={5}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { glideMs: v },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                glideMs: DEFAULT_SOUND_PARAMS.glideMs,
-                              },
-                            })
-                          }
-                        />
-                      )}
+                <div className="sk-effects-grid">
+                  {(editingParamsSet.has("hammer") ||
+                    editingParamsSet.has("brightness") ||
+                    editingParamsSet.has("veltrack") ||
+                    editingParamsSet.has("offset") ||
+                    editingParamsSet.has("glide")) && (
+                    <div className="sk-comp-col">
+                      <div className="sk-comp-col-title">Tone & Touch</div>
+                      <div className="sk-fx-knobs-wrap">
+                        {editingParamsSet.has("hammer") && (
+                          <RotaryKnob
+                            label="Hammer"
+                            value={Math.round(
+                              editingLayer.params.hammerHardness * 100
+                            )}
+                            min={0}
+                            max={100}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.hammerHardness * 100)} %`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { hammerHardness: v / 100 },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  hammerHardness:
+                                    DEFAULT_SOUND_PARAMS.hammerHardness,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                        {editingParamsSet.has("brightness") && (
+                          <RotaryKnob
+                            label="Tone"
+                            value={Math.round(
+                              editingLayer.params.brightness * 100
+                            )}
+                            min={0}
+                            max={100}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.brightness * 100)} %`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { brightness: v / 100 },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  brightness: DEFAULT_SOUND_PARAMS.brightness,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                        {editingParamsSet.has("veltrack") && (
+                          <RotaryKnob
+                            label="Veltrack"
+                            value={Math.round(
+                              editingLayer.params.velTrack * 100
+                            )}
+                            min={0}
+                            max={100}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.velTrack * 100)} %`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { velTrack: v / 100 },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  velTrack: DEFAULT_SOUND_PARAMS.velTrack,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                        {editingParamsSet.has("offset") && (
+                          <RotaryKnob
+                            label="Offset"
+                            value={Math.round(
+                              editingLayer.params.sampleOffsetMs
+                            )}
+                            min={0}
+                            max={40}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.sampleOffsetMs)} ms`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { sampleOffsetMs: v },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  sampleOffsetMs:
+                                    DEFAULT_SOUND_PARAMS.sampleOffsetMs,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                        {editingParamsSet.has("glide") && (
+                          <RotaryKnob
+                            label="Glide"
+                            value={Math.round(editingLayer.params.glideMs)}
+                            min={0}
+                            max={400}
+                            step={5}
+                            displayValue={`${Math.round(editingLayer.params.glideMs)} ms`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { glideMs: v },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  glideMs: DEFAULT_SOUND_PARAMS.glideMs,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  <div className="control-group">
-                    <div className="group-title">Modulation & Space</div>
-                    <div className="group-sliders">
-                      {editingParamsSet.has("chorus") && (
-                        <ParamSlider
-                          label="Chorus"
-                          displayValue={`${Math.round(editingLayer.params.chorusMix * 100)}%`}
-                          value={Math.round(editingLayer.params.chorusMix * 100)}
-                          min={0}
-                          max={100}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { chorusMix: v / 100 },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                chorusMix: DEFAULT_SOUND_PARAMS.chorusMix,
-                              },
-                            })
-                          }
-                        />
-                      )}
-                      {editingParamsSet.has("tremolo") && (
-                        <ParamSlider
-                          label="Tremolo"
-                          displayValue={`${Math.round(editingLayer.params.tremoloDepth * 100)}%`}
-                          value={Math.round(
-                            editingLayer.params.tremoloDepth * 100
-                          )}
-                          min={0}
-                          max={100}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { tremoloDepth: v / 100 },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                tremoloDepth: DEFAULT_SOUND_PARAMS.tremoloDepth,
-                              },
-                            })
-                          }
-                        />
-                      )}
-                      {editingParamsSet.has("delay") && (
-                        <ParamSlider
-                          label="Delay"
-                          displayValue={`${Math.round(editingLayer.params.delayMix * 100)}%`}
-                          value={Math.round(editingLayer.params.delayMix * 100)}
-                          min={0}
-                          max={60}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { delayMix: v / 100 },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                delayMix: DEFAULT_SOUND_PARAMS.delayMix,
-                              },
-                            })
-                          }
-                        />
-                      )}
-                      {editingParamsSet.has("reverb") && (
-                        <ParamSlider
-                          label="Reverb"
-                          displayValue={`${Math.round(editingLayer.params.reverbMix * 100)}%`}
-                          value={Math.round(editingLayer.params.reverbMix * 100)}
-                          min={0}
-                          max={70}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { reverbMix: v / 100 },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                reverbMix: DEFAULT_SOUND_PARAMS.reverbMix,
-                              },
-                            })
-                          }
-                        />
-                      )}
-                      {editingParamsSet.has("width") && (
-                        <ParamSlider
-                          label="Width"
-                          displayValue={`${Math.round(editingLayer.params.stereoWidth * 100)}%`}
-                          value={Math.round(
-                            editingLayer.params.stereoWidth * 100
-                          )}
-                          min={0}
-                          max={150}
-                          onChange={(v) =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: { stereoWidth: v / 100 },
-                            })
-                          }
-                          onReset={() =>
-                            handleUpdateLayer(editingLayerIdx, {
-                              paramsPatch: {
-                                stereoWidth: DEFAULT_SOUND_PARAMS.stereoWidth,
-                              },
-                            })
-                          }
-                        />
-                      )}
+                  {(editingParamsSet.has("chorus") ||
+                    editingParamsSet.has("tremolo")) && (
+                    <div className="sk-comp-col">
+                      <div className="sk-comp-col-title">Modulation</div>
+                      <div className="sk-fx-knobs-wrap">
+                        {editingParamsSet.has("chorus") && (
+                          <RotaryKnob
+                            label="Chorus"
+                            value={Math.round(
+                              editingLayer.params.chorusMix * 100
+                            )}
+                            min={0}
+                            max={100}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.chorusMix * 100)} %`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { chorusMix: v / 100 },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  chorusMix: DEFAULT_SOUND_PARAMS.chorusMix,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                        {editingParamsSet.has("tremolo") && (
+                          <RotaryKnob
+                            label="Tremolo"
+                            value={Math.round(
+                              editingLayer.params.tremoloDepth * 100
+                            )}
+                            min={0}
+                            max={100}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.tremoloDepth * 100)} %`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { tremoloDepth: v / 100 },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  tremoloDepth:
+                                    DEFAULT_SOUND_PARAMS.tremoloDepth,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {(editingParamsSet.has("delay") ||
+                    editingParamsSet.has("reverb") ||
+                    editingParamsSet.has("width")) && (
+                    <div className="sk-comp-col">
+                      <div className="sk-comp-col-title">Space & Stereo</div>
+                      <div className="sk-fx-knobs-wrap">
+                        {editingParamsSet.has("delay") && (
+                          <RotaryKnob
+                            label="Delay"
+                            value={Math.round(
+                              editingLayer.params.delayMix * 100
+                            )}
+                            min={0}
+                            max={60}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.delayMix * 100)} %`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { delayMix: v / 100 },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  delayMix: DEFAULT_SOUND_PARAMS.delayMix,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                        {editingParamsSet.has("reverb") && (
+                          <RotaryKnob
+                            label="Reverb"
+                            value={Math.round(
+                              editingLayer.params.reverbMix * 100
+                            )}
+                            min={0}
+                            max={70}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.reverbMix * 100)} %`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { reverbMix: v / 100 },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  reverbMix: DEFAULT_SOUND_PARAMS.reverbMix,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                        {editingParamsSet.has("width") && (
+                          <RotaryKnob
+                            label="Width"
+                            value={Math.round(
+                              editingLayer.params.stereoWidth * 100
+                            )}
+                            min={0}
+                            max={150}
+                            step={1}
+                            displayValue={`${Math.round(editingLayer.params.stereoWidth * 100)} %`}
+                            onChange={(v) =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: { stereoWidth: v / 100 },
+                              })
+                            }
+                            onReset={() =>
+                              handleUpdateLayer(editingLayerIdx, {
+                                paramsPatch: {
+                                  stereoWidth: DEFAULT_SOUND_PARAMS.stereoWidth,
+                                },
+                              })
+                            }
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

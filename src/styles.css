@@ -1808,10 +1808,48 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
   color: #f3f4f6;
 }
 
-.sk-effects-tab {
+.sk-effects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  flex: 1 1 auto;
+}
+
+.sk-fx-knobs-wrap {
+  flex: 1 1 auto;
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 20px 26px;
+  padding: 18px 14px;
+}
+
+.sk-setting-card .mode-pills {
+  background: #252936;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  padding: 2px;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.sk-setting-card .mode-pill {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: #9ca3af;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.sk-setting-card .mode-pill.active {
+  background: #89a8f0;
+  color: #111827;
+  font-weight: 700;
 }
 
 .sk-settings-grid {
