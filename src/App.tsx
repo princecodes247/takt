@@ -78,6 +78,8 @@ interface StatusDto {
   isPlaying: boolean;
   activeVoices: number;
   sustainActive: boolean;
+  pitchBend?: number;
+  modWheel?: number;
   backingTrackName: string | null;
   backingTrackPlaying: boolean;
   backingTrackLoop: boolean;
@@ -142,6 +144,8 @@ interface TelemetryDto {
   desiredMidiDevices: string[];
   activeMidiNotes: number[];
   sustainActive: boolean;
+  pitchBend: number;
+  modWheel: number;
   backingTrackPlaying: boolean;
   backingTrackPositionMs: number;
   backingTrackDurationMs: number;
@@ -1344,6 +1348,8 @@ export default function App() {
               midiDevices: event.payload.midiDevices,
               desiredMidiDevices: event.payload.desiredMidiDevices,
               sustainActive: event.payload.sustainActive,
+              pitchBend: event.payload.pitchBend,
+              modWheel: event.payload.modWheel,
               backingTrackPlaying: event.payload.backingTrackPlaying,
               backingTrackPositionMs: event.payload.backingTrackPositionMs,
               backingTrackDurationMs: event.payload.backingTrackDurationMs,
@@ -3344,9 +3350,127 @@ export default function App() {
             </div>
           </div>
 
-          {/* Interactive Colored Layer Key-Range Bars */}
-          <div
-            className="zone-bars"
+          <div className="piano-deck-row">
+            {/* Pitch & Mod Wheels */}
+            <div className="wheels-bay" aria-label="Pitch and Modulation Wheels">
+              {(() => {
+                const pb = status?.pitchBend ?? 0;
+                const pbPct = ((pb + 8192) / 16383) * 100;
+                const pbActive = Math.abs(pb) > 128;
+                const updatePb = (e: React.PointerEvent<HTMLDivElement>) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const ratio = 1 - (e.clientY - rect.top) / rect.height;
+                  const clamped = Math.max(0, Math.min(1, ratio));
+                  const val = Math.round(clamped * 16383) - 8192;
+                  setStatus((prev) =>
+                    prev ? { ...prev, pitchBend: val } : prev
+                  );
+                  void invoke("set_pitch_bend", { value: val });
+                };
+                const resetPb = () => {
+                  setStatus((prev) =>
+                    prev ? { ...prev, pitchBend: 0 } : prev
+                  );
+                  void invoke("set_pitch_bend", { value: 0 });
+                };
+                return (
+                  <div className="midi-wheel-col">
+                    <div
+                      className={`midi-wheel-track ${pbActive ? "active" : ""}`}
+                      role="slider"
+                      tabIndex={0}
+                      aria-label="Pitch Bend"
+                      aria-valuemin={-8192}
+                      aria-valuemax={8191}
+                      aria-valuenow={pb}
+                      title="Pitch Bend (springs back to center)"
+                      onPointerDown={(e) => {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        updatePb(e);
+                      }}
+                      onPointerMove={(e) => {
+                        if (e.buttons === 1) updatePb(e);
+                      }}
+                      onPointerUp={resetPb}
+                      onPointerCancel={resetPb}
+                    >
+                      <div className="midi-wheel-center-mark" aria-hidden="true" />
+                      <div
+                        className="midi-wheel-ridge"
+                        style={{ bottom: `calc(${pbPct}% - 4px)` }}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <span className="midi-wheel-label">PB</span>
+                  </div>
+                );
+              })()}
+
+              {(() => {
+                const mw = status?.modWheel ?? 0;
+                const mwPct = (mw / 127) * 100;
+                const mwActive = mw > 2;
+                const updateMw = (e: React.PointerEvent<HTMLDivElement>) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const ratio = 1 - (e.clientY - rect.top) / rect.height;
+                  const clamped = Math.max(0, Math.min(1, ratio));
+                  const val = Math.round(clamped * 127);
+                  setStatus((prev) =>
+                    prev ? { ...prev, modWheel: val } : prev
+                  );
+                  void invoke("set_mod_wheel", { value: val });
+                };
+                const resetMw = () => {
+                  setStatus((prev) =>
+                    prev ? { ...prev, modWheel: 0 } : prev
+                  );
+                  void invoke("set_mod_wheel", { value: 0 });
+                };
+                return (
+                  <div className="midi-wheel-col">
+                    <div
+                      className={`midi-wheel-track ${mwActive ? "active" : ""}`}
+                      role="slider"
+                      tabIndex={0}
+                      aria-label="Modulation Wheel"
+                      aria-valuemin={0}
+                      aria-valuemax={127}
+                      aria-valuenow={mw}
+                      title={`Mod Wheel (${mw}) · double-click to reset`}
+                      onPointerDown={(e) => {
+                        if (e.detail >= 2) {
+                          resetMw();
+                          return;
+                        }
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        updateMw(e);
+                      }}
+                      onPointerMove={(e) => {
+                        if (e.buttons === 1) updateMw(e);
+                      }}
+                      onDoubleClick={resetMw}
+                    >
+                      <div
+                        className="midi-wheel-fill"
+                        style={{ height: `${mwPct}%` }}
+                        aria-hidden="true"
+                      />
+                      <div
+                        className="midi-wheel-ridge"
+                        style={{ bottom: `calc(${mwPct}% - 4px)` }}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <span className="midi-wheel-label">MOD</span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="piano-deck-main">
+              {/* Interactive Colored Layer Key-Range Bars */}
+              <div
+                className="zone-bars"
             role="button"
             tabIndex={0}
             title="Click to edit layer key ranges"
@@ -3460,6 +3584,8 @@ export default function App() {
                   </button>
                 );
               })}
+            </div>
+          </div>
             </div>
           </div>
         </footer>

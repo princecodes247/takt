@@ -1573,6 +1573,110 @@ input[type="range"].v-fader::-webkit-slider-thumb {
   padding: 0 5px;
 }
 
+.piano-deck-row {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.piano-deck-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wheels-bay {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.midi-wheel-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.midi-wheel-track {
+  position: relative;
+  flex: 1 1 auto;
+  width: 22px;
+  min-height: 54px;
+  border-radius: 6px;
+  background: linear-gradient(
+    180deg,
+    #0e1017 0%,
+    #252a38 22%,
+    #313748 50%,
+    #252a38 78%,
+    #0e1017 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 3px 6px rgba(0, 0, 0, 0.75),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.midi-wheel-track.active {
+  border-color: rgba(137, 168, 240, 0.55);
+}
+
+.midi-wheel-center-mark {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 50%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.16);
+  pointer-events: none;
+}
+
+.midi-wheel-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(137, 168, 240, 0.45) 0%,
+    rgba(137, 168, 240, 0.12) 100%
+  );
+  pointer-events: none;
+}
+
+.midi-wheel-ridge {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 7px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #64748b 0%, #334155 55%, #1e293b 100%);
+  border-top: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+.midi-wheel-track.active .midi-wheel-ridge {
+  background: linear-gradient(180deg, #c7d9ff 0%, #89a8f0 100%);
+  box-shadow: 0 0 8px rgba(137, 168, 240, 0.65);
+}
+
+.midi-wheel-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  line-height: 1;
+}
+
 .zone-bars {
   display: flex;
   flex-direction: column;

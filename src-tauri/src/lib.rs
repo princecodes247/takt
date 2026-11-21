@@ -21,6 +21,8 @@ enum EngineCmd {
     Panic(Reply<StatusDto>),
     TestNote(u8, bool, u8),
     SetSustain(bool),
+    SetPitchBend(i16),
+    SetModWheel(u8),
     MidiDevicesChanged,
     LoadBackingTrack(String, Vec<u8>, String, Reply<StatusDto>),
     SetBackingTrackPlaying(bool, Reply<StatusDto>),
@@ -254,6 +256,8 @@ struct StatusDto {
     is_playing: bool,
     active_voices: usize,
     sustain_active: bool,
+    pitch_bend: i16,
+    mod_wheel: u8,
     backing_track_name: Option<String>,
     backing_track_playing: bool,
     backing_track_loop: bool,
@@ -287,6 +291,8 @@ struct TelemetryDto {
     desired_midi_devices: Vec<String>,
     active_midi_notes: Vec<u8>,
     sustain_active: bool,
+    pitch_bend: i16,
+    mod_wheel: u8,
     backing_track_playing: bool,
     backing_track_position_ms: u32,
     backing_track_duration_ms: u32,
@@ -306,6 +312,8 @@ fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
         is_playing: st.is_playing,
         active_voices: st.active_voices,
         sustain_active: st.sustain_active,
+        pitch_bend: st.pitch_bend,
+        mod_wheel: st.mod_wheel,
         backing_track_name: st.backing_track_name,
         backing_track_playing: st.backing_track_playing,
         backing_track_loop: st.backing_track_loop,
@@ -459,6 +467,22 @@ async fn set_sustain(state: State<'_, AppState>, pressed: bool) -> Result<(), St
     state
         .tx
         .send(EngineCmd::SetSustain(pressed))
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
+#[tauri::command]
+async fn set_pitch_bend(state: State<'_, AppState>, value: i16) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::SetPitchBend(value))
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
+#[tauri::command]
+async fn set_mod_wheel(state: State<'_, AppState>, value: u8) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::SetModWheel(value))
         .map_err(|_| "engine thread stopped".to_string())
 }
 
@@ -743,6 +767,12 @@ pub fn run() {
                         EngineCmd::SetSustain(pressed) => {
                             engine.set_sustain(pressed);
                         }
+                        EngineCmd::SetPitchBend(value) => {
+                            engine.set_pitch_bend(value);
+                        }
+                        EngineCmd::SetModWheel(value) => {
+                            engine.set_mod_wheel(value);
+                        }
                         EngineCmd::MidiDevicesChanged => {
                             *midi_changed = true;
                         }
@@ -864,6 +894,8 @@ pub fn run() {
                                 desired_midi_devices: st.desired_midi_devices,
                                 active_midi_notes: st.active_midi_notes,
                                 sustain_active: st.sustain_active,
+                                pitch_bend: st.pitch_bend,
+                                mod_wheel: st.mod_wheel,
                                 backing_track_playing: st.backing_track_playing,
                                 backing_track_position_ms: st.backing_track_position_ms,
                                 backing_track_duration_ms: st.backing_track_duration_ms,
@@ -893,6 +925,8 @@ pub fn run() {
             panic_all_notes_off,
             trigger_test_note,
             set_sustain,
+            set_pitch_bend,
+            set_mod_wheel,
             load_backing_track,
             set_backing_track_playing,
             set_backing_track_loop,

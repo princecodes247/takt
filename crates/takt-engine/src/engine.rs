@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicI8, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI16, AtomicI64, AtomicI8, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -55,6 +55,8 @@ pub struct EngineStatus {
     pub active_voices: usize,
     pub active_midi_notes: Vec<u8>,
     pub sustain_active: bool,
+    pub pitch_bend: i16,
+    pub mod_wheel: u8,
     pub backing_track_name: Option<String>,
     pub backing_track_playing: bool,
     pub backing_track_loop: bool,
@@ -132,6 +134,8 @@ pub struct TaktEngine {
     active_voices: Arc<AtomicUsize>,
     midi_active_notes: Arc<[AtomicU64; 2]>,
     sustain_active: Arc<AtomicBool>,
+    pitch_bend: Arc<AtomicI16>,
+    mod_wheel: Arc<AtomicU8>,
     last_program_change: Arc<AtomicI8>,
     // Backing track state
     current_track: Option<Arc<SampleData>>,
@@ -191,6 +195,8 @@ impl TaktEngine {
             active_voices: Arc::new(AtomicUsize::new(0)),
             midi_active_notes: Arc::new([AtomicU64::new(0), AtomicU64::new(0)]),
             sustain_active: Arc::new(AtomicBool::new(false)),
+            pitch_bend: Arc::new(AtomicI16::new(0)),
+            mod_wheel: Arc::new(AtomicU8::new(0)),
             last_program_change: Arc::new(AtomicI8::new(-1)),
             current_track: Some(Arc::new(synthesize_demo_backing_track())),
             current_track_name: Some("Demo Groove · 120 BPM (C)".to_string()),
@@ -419,6 +425,22 @@ impl TaktEngine {
         });
     }
 
+    /// Sets the pitch bend wheel (`-8192..=8191`, `0` = center).
+    pub fn set_pitch_bend(&mut self, value: i16) {
+        self.inject_midi_event(MidiEvent::PitchBend {
+            channel: 0,
+            value: value.clamp(-8192, 8191),
+        });
+    }
+
+    /// Sets the modulation wheel (`0..=127`).
+    pub fn set_mod_wheel(&mut self, value: u8) {
+        self.inject_midi_event(MidiEvent::ModWheel {
+            channel: 0,
+            value: value.min(127),
+        });
+    }
+
     /// Decodes and loads a backing track (WAV, FLAC, OGG) into memory and queues it to the audio thread.
     pub fn load_backing_track_bytes(
         &mut self,
@@ -560,6 +582,8 @@ impl TaktEngine {
             active_voices: self.active_voices.load(Ordering::Relaxed),
             active_midi_notes,
             sustain_active: self.sustain_active.load(Ordering::Relaxed),
+            pitch_bend: self.pitch_bend.load(Ordering::Relaxed),
+            mod_wheel: self.mod_wheel.load(Ordering::Relaxed),
             backing_track_name: self.current_track_name.clone(),
             backing_track_playing: self.track_playing.load(Ordering::Relaxed),
             backing_track_loop: self.track_looping.load(Ordering::Relaxed),
@@ -645,10 +669,13 @@ impl TaktEngine {
         let voices_atomic = Arc::clone(&self.active_voices);
         let midi_notes_atomic = Arc::clone(&self.midi_active_notes);
         let sustain_atomic = Arc::clone(&self.sustain_active);
+        let pitch_bend_atomic = Arc::clone(&self.pitch_bend);
+        let mod_wheel_atomic = Arc::clone(&self.mod_wheel);
         let program_change_atomic = Arc::clone(&self.last_program_change);
         midi_notes_atomic[0].store(0, Ordering::Relaxed);
         midi_notes_atomic[1].store(0, Ordering::Relaxed);
         sustain_atomic.store(false, Ordering::Relaxed);
+        pitch_bend_atomic.store(0, Ordering::Relaxed);
 
         let route_event_to_layer = |layer: &mut AudioLayer, ev: MidiEvent, sample_rate: u32| {
             let params = layer.params.load();
@@ -736,10 +763,17 @@ impl TaktEngine {
                     MidiEvent::SustainPedal { pressed, .. } => {
                         sustain_atomic.store(pressed, Ordering::Relaxed);
                     }
+                    MidiEvent::PitchBend { value, .. } => {
+                        pitch_bend_atomic.store(value, Ordering::Relaxed);
+                    }
+                    MidiEvent::ModWheel { value, .. } => {
+                        mod_wheel_atomic.store(value, Ordering::Relaxed);
+                    }
                     MidiEvent::AllNotesOff => {
                         midi_notes_atomic[0].store(0, Ordering::Relaxed);
                         midi_notes_atomic[1].store(0, Ordering::Relaxed);
                         sustain_atomic.store(false, Ordering::Relaxed);
+                        pitch_bend_atomic.store(0, Ordering::Relaxed);
                     }
                     _ => {}
                 }
@@ -762,10 +796,17 @@ impl TaktEngine {
                     MidiEvent::SustainPedal { pressed, .. } => {
                         sustain_atomic.store(pressed, Ordering::Relaxed);
                     }
+                    MidiEvent::PitchBend { value, .. } => {
+                        pitch_bend_atomic.store(value, Ordering::Relaxed);
+                    }
+                    MidiEvent::ModWheel { value, .. } => {
+                        mod_wheel_atomic.store(value, Ordering::Relaxed);
+                    }
                     MidiEvent::AllNotesOff => {
                         midi_notes_atomic[0].store(0, Ordering::Relaxed);
                         midi_notes_atomic[1].store(0, Ordering::Relaxed);
                         sustain_atomic.store(false, Ordering::Relaxed);
+                        pitch_bend_atomic.store(0, Ordering::Relaxed);
                     }
                     MidiEvent::ProgramChange { program, .. } => {
                         program_change_atomic.store((program & 127) as i8, Ordering::Release);
