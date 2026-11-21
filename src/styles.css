@@ -35,6 +35,15 @@ body {
   font-family: var(--font-display);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+select {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 #root {
@@ -1376,6 +1385,11 @@ input[type="range"].v-fader::-webkit-slider-thumb {
   font-size: 1.25rem;
   font-weight: 500;
   background: color-mix(in srgb, var(--slot-color, #ec4899) 12%, transparent);
+}
+
+.add-plus span {
+  position: relative;
+  top: -2px;
 }
 
 /* Bottom Zone Bars + 88-Key Piano */
@@ -3122,11 +3136,11 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  background: var(--bg-recessed);
-  border: 1px solid var(--border-subtle);
-  border-radius: 9px;
-  padding: 5px 8px;
+  gap: 8px;
+  background: linear-gradient(180deg, #1b1e27 0%, #14171f 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 5px 7px;
   flex-shrink: 0;
 }
 
@@ -3135,46 +3149,64 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
   align-items: center;
   gap: 6px;
   overflow-x: auto;
+  flex: 1 1 auto;
 }
 
 .snap-chip {
   display: inline-flex;
   align-items: center;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
+  background: #232734;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
 }
 
+.snap-chip:hover {
+  background: #2a2f3e;
+}
+
 .snap-chip.active {
-  border-color: var(--accent);
-  background: rgba(245, 158, 11, 0.16);
+  border-color: #c7d9ff;
+  background: #c7d9ff;
 }
 
 .snap-btn {
   background: transparent;
   border: none;
-  color: var(--text-primary);
+  color: #e5e7eb;
   font-family: var(--font-display);
-  font-size: 0.78rem;
-  font-weight: 650;
-  padding: 5px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 7px 14px;
   cursor: pointer;
 }
 
 .snap-chip.active .snap-btn {
-  color: var(--accent);
+  color: #111827;
+  font-weight: 700;
 }
 
 .snap-del {
   background: transparent;
   border: none;
-  border-left: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  padding: 4px 6px;
+  color: #6b7280;
+  padding: 6px 8px 6px 2px;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
+  opacity: 0.55;
+}
+
+.snap-chip:hover .snap-del {
+  opacity: 1;
+}
+
+.snap-chip.active .snap-del {
+  color: #334155;
+}
+
+.snap-del:hover {
+  color: #ef4444;
 }
 
 .snapshots-actions {
@@ -3182,4 +3214,31 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.snap-action-btn {
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 8px;
+  background: #232734;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #e5e7eb;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.snap-action-btn:hover {
+  border-color: #89a8f0;
+  background: #2b3040;
+  color: #ffffff;
+}
+
+.snap-save-btn {
+  width: 34px;
+  padding: 0;
+  color: #c7d9ff;
 }

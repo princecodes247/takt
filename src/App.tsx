@@ -1007,10 +1007,10 @@ export default function App() {
         setStatus((prev) =>
           prev
             ? {
-                ...prev,
-                worshipPadEnabled: nextPadStatus.worshipPadEnabled,
-                worshipPadKey: nextPadStatus.worshipPadKey,
-              }
+              ...prev,
+              worshipPadEnabled: nextPadStatus.worshipPadEnabled,
+              worshipPadKey: nextPadStatus.worshipPadKey,
+            }
             : nextPadStatus
         );
       } catch (err) {
@@ -1044,7 +1044,7 @@ export default function App() {
             maxNote: to.maxNote,
             octaveShift: to.octaveShift,
             params,
-          }).catch(() => {});
+          }).catch(() => { });
 
           return {
             ...from,
@@ -1089,11 +1089,11 @@ export default function App() {
         const nextSnaps = p.snapshots.map((s, i) =>
           i === activeSnapshotIdx
             ? {
-                ...s,
-                layers: snapLayers,
-                worshipPadEnabled: status.worshipPadEnabled,
-                worshipPadKey: status.worshipPadKey,
-              }
+              ...s,
+              layers: snapLayers,
+              worshipPadEnabled: status.worshipPadEnabled,
+              worshipPadKey: status.worshipPadKey,
+            }
             : s
         );
         return { ...p, layerSoundIds, snapshots: nextSnaps };
@@ -1123,10 +1123,10 @@ export default function App() {
       prev.map((p) =>
         p.id === activePatch.id
           ? {
-              ...p,
-              layerSoundIds: status.layers.map((l) => l.soundId),
-              snapshots: [...p.snapshots, newSnap],
-            }
+            ...p,
+            layerSoundIds: status.layers.map((l) => l.soundId),
+            snapshots: [...p.snapshots, newSnap],
+          }
           : p
       )
     );
@@ -1197,9 +1197,9 @@ export default function App() {
           target === "add"
             ? await invoke<StatusDto>("add_layer", { soundId })
             : await invoke<StatusDto>("set_layer_sound", {
-                index: target,
-                soundId,
-              });
+              index: target,
+              soundId,
+            });
         setStatus(next);
         setPickerTarget(null);
       } catch (err) {
@@ -1337,17 +1337,17 @@ export default function App() {
         setStatus((prev) =>
           prev
             ? {
-                ...prev,
-                isPlaying: event.payload.isPlaying,
-                activeVoices: event.payload.activeVoices,
-                estimatedLatencyMs: event.payload.estimatedLatencyMs,
-                midiDevices: event.payload.midiDevices,
-                desiredMidiDevices: event.payload.desiredMidiDevices,
-                sustainActive: event.payload.sustainActive,
-                backingTrackPlaying: event.payload.backingTrackPlaying,
-                backingTrackPositionMs: event.payload.backingTrackPositionMs,
-                backingTrackDurationMs: event.payload.backingTrackDurationMs,
-              }
+              ...prev,
+              isPlaying: event.payload.isPlaying,
+              activeVoices: event.payload.activeVoices,
+              estimatedLatencyMs: event.payload.estimatedLatencyMs,
+              midiDevices: event.payload.midiDevices,
+              desiredMidiDevices: event.payload.desiredMidiDevices,
+              sustainActive: event.payload.sustainActive,
+              backingTrackPlaying: event.payload.backingTrackPlaying,
+              backingTrackPositionMs: event.payload.backingTrackPositionMs,
+              backingTrackDurationMs: event.payload.backingTrackDurationMs,
+            }
             : prev
         );
         setActiveMidiNotes(new Set(event.payload.activeMidiNotes));
@@ -1382,7 +1382,7 @@ export default function App() {
     activeKeyNotesRef.current.clear();
     setActiveKeyboardNotes(new Set());
     for (const note of notes) {
-      invoke("trigger_test_note", { note, down: false }).catch(() => {});
+      invoke("trigger_test_note", { note, down: false }).catch(() => { });
     }
   }, []);
 
@@ -1901,7 +1901,7 @@ export default function App() {
 
             <div className="midi-groups">
               {groupedMidi.length === 0 &&
-              (status?.desiredMidiDevices.length ?? 0) === 0 ? (
+                (status?.desiredMidiDevices.length ?? 0) === 0 ? (
                 <span className="midi-empty">No MIDI devices connected</span>
               ) : (
                 <>
@@ -1911,11 +1911,11 @@ export default function App() {
                     const visiblePorts = showAllMidiPorts
                       ? group.ports
                       : group.ports.filter(
-                          (p) =>
-                            p.name === primaryPort.name ||
-                            (status?.desiredMidiDevices.includes(p.name) ??
-                              false)
-                        );
+                        (p) =>
+                          p.name === primaryPort.name ||
+                          (status?.desiredMidiDevices.includes(p.name) ??
+                            false)
+                      );
                     return (
                       <div key={group.deviceName} className="midi-group-row">
                         <span className="midi-group-name">
@@ -3092,7 +3092,9 @@ export default function App() {
                       <div className="add-ghost-fader" />
                     </div>
                     <div className="add-overlay">
-                      <span className="add-plus">+</span>
+                      <span className="add-plus">
+                        <span>+</span>
+                      </span>
                       <span>Add Sound</span>
                     </div>
                   </button>
@@ -3135,7 +3137,7 @@ export default function App() {
                 <div className="snapshots-actions">
                   <button
                     type="button"
-                    className="btn-mini"
+                    className="snap-action-btn"
                     onClick={handleAddSnapshot}
                     title="Add new Snapshot from current state"
                   >
@@ -3143,11 +3145,26 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    className="btn-mini active"
+                    className="snap-action-btn snap-save-btn"
                     onClick={handleSaveCurrentSnapshot}
+                    aria-label="Save Snapshot"
                     title="Save current layer levels/effects into active Snapshot"
                   >
-                    Save Snap
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                      <polyline points="17 21 17 13 7 13 7 21" />
+                      <polyline points="7 3 7 8 15 8" />
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -3377,9 +3394,9 @@ export default function App() {
                   style={{
                     background:
                       LAYER_COLORS[
-                        (pickerTarget === "add"
-                          ? layers.length
-                          : pickerTarget) % LAYER_COLORS.length
+                      (pickerTarget === "add"
+                        ? layers.length
+                        : pickerTarget) % LAYER_COLORS.length
                       ],
                   }}
                 />
@@ -3773,7 +3790,7 @@ export default function App() {
                         24 +
                         ((Math.log10(Math.max(20, hz)) - Math.log10(20)) /
                           (Math.log10(20000) - Math.log10(20))) *
-                          620;
+                        620;
                       const minX = toX(p.modFilterMinHz);
                       const maxX = toX(p.modFilterMaxHz);
                       const resY = 82 - p.resonance * 48;
@@ -4166,272 +4183,272 @@ export default function App() {
                     editingParamsSet.has("veltrack") ||
                     editingParamsSet.has("offset") ||
                     editingParamsSet.has("glide")) && (
-                    <div className="sk-comp-col">
-                      <div className="sk-comp-col-title">Tone & Touch</div>
-                      <div className="sk-fx-knobs-wrap">
-                        {editingParamsSet.has("hammer") && (
-                          <RotaryKnob
-                            label="Hammer"
-                            value={Math.round(
-                              editingLayer.params.hammerHardness * 100
-                            )}
-                            min={0}
-                            max={100}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.hammerHardness * 100)} %`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { hammerHardness: v / 100 },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  hammerHardness:
-                                    DEFAULT_SOUND_PARAMS.hammerHardness,
-                                },
-                              })
-                            }
-                          />
-                        )}
-                        {editingParamsSet.has("brightness") && (
-                          <RotaryKnob
-                            label="Tone"
-                            value={Math.round(
-                              editingLayer.params.brightness * 100
-                            )}
-                            min={0}
-                            max={100}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.brightness * 100)} %`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { brightness: v / 100 },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  brightness: DEFAULT_SOUND_PARAMS.brightness,
-                                },
-                              })
-                            }
-                          />
-                        )}
-                        {editingParamsSet.has("veltrack") && (
-                          <RotaryKnob
-                            label="Veltrack"
-                            value={Math.round(
-                              editingLayer.params.velTrack * 100
-                            )}
-                            min={0}
-                            max={100}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.velTrack * 100)} %`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { velTrack: v / 100 },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  velTrack: DEFAULT_SOUND_PARAMS.velTrack,
-                                },
-                              })
-                            }
-                          />
-                        )}
-                        {editingParamsSet.has("offset") && (
-                          <RotaryKnob
-                            label="Offset"
-                            value={Math.round(
-                              editingLayer.params.sampleOffsetMs
-                            )}
-                            min={0}
-                            max={40}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.sampleOffsetMs)} ms`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { sampleOffsetMs: v },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  sampleOffsetMs:
-                                    DEFAULT_SOUND_PARAMS.sampleOffsetMs,
-                                },
-                              })
-                            }
-                          />
-                        )}
-                        {editingParamsSet.has("glide") && (
-                          <RotaryKnob
-                            label="Glide"
-                            value={Math.round(editingLayer.params.glideMs)}
-                            min={0}
-                            max={400}
-                            step={5}
-                            displayValue={`${Math.round(editingLayer.params.glideMs)} ms`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { glideMs: v },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  glideMs: DEFAULT_SOUND_PARAMS.glideMs,
-                                },
-                              })
-                            }
-                          />
-                        )}
+                      <div className="sk-comp-col">
+                        <div className="sk-comp-col-title">Tone & Touch</div>
+                        <div className="sk-fx-knobs-wrap">
+                          {editingParamsSet.has("hammer") && (
+                            <RotaryKnob
+                              label="Hammer"
+                              value={Math.round(
+                                editingLayer.params.hammerHardness * 100
+                              )}
+                              min={0}
+                              max={100}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.hammerHardness * 100)} %`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { hammerHardness: v / 100 },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    hammerHardness:
+                                      DEFAULT_SOUND_PARAMS.hammerHardness,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                          {editingParamsSet.has("brightness") && (
+                            <RotaryKnob
+                              label="Tone"
+                              value={Math.round(
+                                editingLayer.params.brightness * 100
+                              )}
+                              min={0}
+                              max={100}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.brightness * 100)} %`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { brightness: v / 100 },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    brightness: DEFAULT_SOUND_PARAMS.brightness,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                          {editingParamsSet.has("veltrack") && (
+                            <RotaryKnob
+                              label="Veltrack"
+                              value={Math.round(
+                                editingLayer.params.velTrack * 100
+                              )}
+                              min={0}
+                              max={100}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.velTrack * 100)} %`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { velTrack: v / 100 },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    velTrack: DEFAULT_SOUND_PARAMS.velTrack,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                          {editingParamsSet.has("offset") && (
+                            <RotaryKnob
+                              label="Offset"
+                              value={Math.round(
+                                editingLayer.params.sampleOffsetMs
+                              )}
+                              min={0}
+                              max={40}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.sampleOffsetMs)} ms`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { sampleOffsetMs: v },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    sampleOffsetMs:
+                                      DEFAULT_SOUND_PARAMS.sampleOffsetMs,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                          {editingParamsSet.has("glide") && (
+                            <RotaryKnob
+                              label="Glide"
+                              value={Math.round(editingLayer.params.glideMs)}
+                              min={0}
+                              max={400}
+                              step={5}
+                              displayValue={`${Math.round(editingLayer.params.glideMs)} ms`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { glideMs: v },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    glideMs: DEFAULT_SOUND_PARAMS.glideMs,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
                   {(editingParamsSet.has("chorus") ||
                     editingParamsSet.has("tremolo")) && (
-                    <div className="sk-comp-col">
-                      <div className="sk-comp-col-title">Modulation</div>
-                      <div className="sk-fx-knobs-wrap">
-                        {editingParamsSet.has("chorus") && (
-                          <RotaryKnob
-                            label="Chorus"
-                            value={Math.round(
-                              editingLayer.params.chorusMix * 100
-                            )}
-                            min={0}
-                            max={100}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.chorusMix * 100)} %`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { chorusMix: v / 100 },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  chorusMix: DEFAULT_SOUND_PARAMS.chorusMix,
-                                },
-                              })
-                            }
-                          />
-                        )}
-                        {editingParamsSet.has("tremolo") && (
-                          <RotaryKnob
-                            label="Tremolo"
-                            value={Math.round(
-                              editingLayer.params.tremoloDepth * 100
-                            )}
-                            min={0}
-                            max={100}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.tremoloDepth * 100)} %`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { tremoloDepth: v / 100 },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  tremoloDepth:
-                                    DEFAULT_SOUND_PARAMS.tremoloDepth,
-                                },
-                              })
-                            }
-                          />
-                        )}
+                      <div className="sk-comp-col">
+                        <div className="sk-comp-col-title">Modulation</div>
+                        <div className="sk-fx-knobs-wrap">
+                          {editingParamsSet.has("chorus") && (
+                            <RotaryKnob
+                              label="Chorus"
+                              value={Math.round(
+                                editingLayer.params.chorusMix * 100
+                              )}
+                              min={0}
+                              max={100}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.chorusMix * 100)} %`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { chorusMix: v / 100 },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    chorusMix: DEFAULT_SOUND_PARAMS.chorusMix,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                          {editingParamsSet.has("tremolo") && (
+                            <RotaryKnob
+                              label="Tremolo"
+                              value={Math.round(
+                                editingLayer.params.tremoloDepth * 100
+                              )}
+                              min={0}
+                              max={100}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.tremoloDepth * 100)} %`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { tremoloDepth: v / 100 },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    tremoloDepth:
+                                      DEFAULT_SOUND_PARAMS.tremoloDepth,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
                   {(editingParamsSet.has("delay") ||
                     editingParamsSet.has("reverb") ||
                     editingParamsSet.has("width")) && (
-                    <div className="sk-comp-col">
-                      <div className="sk-comp-col-title">Space & Stereo</div>
-                      <div className="sk-fx-knobs-wrap">
-                        {editingParamsSet.has("delay") && (
-                          <RotaryKnob
-                            label="Delay"
-                            value={Math.round(
-                              editingLayer.params.delayMix * 100
-                            )}
-                            min={0}
-                            max={60}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.delayMix * 100)} %`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { delayMix: v / 100 },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  delayMix: DEFAULT_SOUND_PARAMS.delayMix,
-                                },
-                              })
-                            }
-                          />
-                        )}
-                        {editingParamsSet.has("reverb") && (
-                          <RotaryKnob
-                            label="Reverb"
-                            value={Math.round(
-                              editingLayer.params.reverbMix * 100
-                            )}
-                            min={0}
-                            max={70}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.reverbMix * 100)} %`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { reverbMix: v / 100 },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  reverbMix: DEFAULT_SOUND_PARAMS.reverbMix,
-                                },
-                              })
-                            }
-                          />
-                        )}
-                        {editingParamsSet.has("width") && (
-                          <RotaryKnob
-                            label="Width"
-                            value={Math.round(
-                              editingLayer.params.stereoWidth * 100
-                            )}
-                            min={0}
-                            max={150}
-                            step={1}
-                            displayValue={`${Math.round(editingLayer.params.stereoWidth * 100)} %`}
-                            onChange={(v) =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: { stereoWidth: v / 100 },
-                              })
-                            }
-                            onReset={() =>
-                              handleUpdateLayer(editingLayerIdx, {
-                                paramsPatch: {
-                                  stereoWidth: DEFAULT_SOUND_PARAMS.stereoWidth,
-                                },
-                              })
-                            }
-                          />
-                        )}
+                      <div className="sk-comp-col">
+                        <div className="sk-comp-col-title">Space & Stereo</div>
+                        <div className="sk-fx-knobs-wrap">
+                          {editingParamsSet.has("delay") && (
+                            <RotaryKnob
+                              label="Delay"
+                              value={Math.round(
+                                editingLayer.params.delayMix * 100
+                              )}
+                              min={0}
+                              max={60}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.delayMix * 100)} %`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { delayMix: v / 100 },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    delayMix: DEFAULT_SOUND_PARAMS.delayMix,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                          {editingParamsSet.has("reverb") && (
+                            <RotaryKnob
+                              label="Reverb"
+                              value={Math.round(
+                                editingLayer.params.reverbMix * 100
+                              )}
+                              min={0}
+                              max={70}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.reverbMix * 100)} %`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { reverbMix: v / 100 },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    reverbMix: DEFAULT_SOUND_PARAMS.reverbMix,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                          {editingParamsSet.has("width") && (
+                            <RotaryKnob
+                              label="Width"
+                              value={Math.round(
+                                editingLayer.params.stereoWidth * 100
+                              )}
+                              min={0}
+                              max={150}
+                              step={1}
+                              displayValue={`${Math.round(editingLayer.params.stereoWidth * 100)} %`}
+                              onChange={(v) =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: { stereoWidth: v / 100 },
+                                })
+                              }
+                              onReset={() =>
+                                handleUpdateLayer(editingLayerIdx, {
+                                  paramsPatch: {
+                                    stereoWidth: DEFAULT_SOUND_PARAMS.stereoWidth,
+                                  },
+                                })
+                              }
+                            />
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
                 </div>
               )}
 
@@ -4624,38 +4641,38 @@ export default function App() {
               <div className="sk-insp-footer-left">
                 {(inspectorTab === "compressor" ||
                   inspectorTab === "equalizer") && (
-                  <button
-                    type="button"
-                    className={`sk-fx-pwr-btn ${(inspectorTab === "compressor" ? editingLayer.params.compEnabled : editingLayer.params.eqEnabled) ? "on" : ""}`}
-                    onClick={() =>
-                      handleUpdateLayer(
-                        editingLayerIdx,
-                        inspectorTab === "compressor"
-                          ? {
+                    <button
+                      type="button"
+                      className={`sk-fx-pwr-btn ${(inspectorTab === "compressor" ? editingLayer.params.compEnabled : editingLayer.params.eqEnabled) ? "on" : ""}`}
+                      onClick={() =>
+                        handleUpdateLayer(
+                          editingLayerIdx,
+                          inspectorTab === "compressor"
+                            ? {
                               paramsPatch: {
                                 compEnabled: !editingLayer.params.compEnabled,
                               },
                             }
-                          : {
+                            : {
                               paramsPatch: {
                                 eqEnabled: !editingLayer.params.eqEnabled,
                               },
                             }
-                      )
-                    }
-                  >
-                    <span className="sk-fx-pwr-icon">⏻</span>
-                    <span>
-                      {(
-                        inspectorTab === "compressor"
-                          ? editingLayer.params.compEnabled
-                          : editingLayer.params.eqEnabled
-                      )
-                        ? "Effect ON"
-                        : "Effect OFF"}
-                    </span>
-                  </button>
-                )}
+                        )
+                      }
+                    >
+                      <span className="sk-fx-pwr-icon">⏻</span>
+                      <span>
+                        {(
+                          inspectorTab === "compressor"
+                            ? editingLayer.params.compEnabled
+                            : editingLayer.params.eqEnabled
+                        )
+                          ? "Effect ON"
+                          : "Effect OFF"}
+                      </span>
+                    </button>
+                  )}
               </div>
               <div className="sk-insp-footer-right">
                 <button
