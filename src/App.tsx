@@ -397,6 +397,7 @@ function RotaryKnob({
   displayValue,
   color = "#93b4f5",
   size = 54,
+  hideValue = false,
   onChange,
   onReset,
 }: {
@@ -408,6 +409,7 @@ function RotaryKnob({
   displayValue: string;
   color?: string;
   size?: number;
+  hideValue?: boolean;
   onChange: (val: number) => void;
   onReset?: () => void;
 }) {
@@ -498,7 +500,7 @@ function RotaryKnob({
           />
         </svg>
       </div>
-      <span className="sk-knob-val">{displayValue}</span>
+      {!hideValue && <span className="sk-knob-val">{displayValue}</span>}
     </div>
   );
 }
@@ -1835,51 +1837,43 @@ export default function App() {
         <div className="header-right">
           <button
             type="button"
-            className="btn btn-panic btn-sm"
+            className="btn btn-panic"
             onClick={handlePanic}
+            aria-label="Panic (All Notes Off)"
+            title="Panic · All Notes Off"
           >
-            Panic
+            <svg
+              viewBox="0 0 24 24"
+              width="15"
+              height="15"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.1"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <line x1="5.6" y1="5.6" x2="18.4" y2="18.4" />
+            </svg>
           </button>
 
-          <div className="header-master" title="Double-click to reset (80%)">
+          <div className="header-master" title="Master Volume · Double-click to reset (80%)">
             <span className="master-label">Master</span>
-            <input
-              type="range"
-              className="sk-master-slider"
-              style={
-                { "--fill": `${(volumePct / 125) * 100}%` } as React.CSSProperties
-              }
-              aria-label="Master Volume"
+            <RotaryKnob
+              label=""
+              hideValue
+              size={26}
+              color="#89a8f0"
+              value={volumePct}
               min={0}
               max={125}
-              value={volumePct}
-              onChange={(e) => handleVolumeChange(Number(e.target.value))}
-              onDoubleClick={() => handleVolumeChange(80)}
+              step={1}
+              displayValue={`${volumePct}%`}
+              onChange={handleVolumeChange}
+              onReset={() => handleVolumeChange(80)}
             />
             <span className="master-pct">{volumePct}%</span>
-          </div>
-
-          <div className="view-switch" role="group" aria-label="Stage View">
-            <button
-              type="button"
-              className={`view-btn ${!setupOpen && !zonesView ? "active" : ""}`}
-              onClick={() => {
-                setSetupOpen(false);
-                setZonesView(false);
-              }}
-            >
-              Stage
-            </button>
-            <button
-              type="button"
-              className={`view-btn ${!setupOpen && zonesView ? "active" : ""}`}
-              onClick={() => {
-                setSetupOpen(false);
-                setZonesView(true);
-              }}
-            >
-              Ranges
-            </button>
           </div>
 
           <button
