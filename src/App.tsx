@@ -121,6 +121,12 @@ export function App() {
   const activeMouseNoteRef = useRef<number | null>(null);
   const mousePressedRef = useRef<boolean>(false);
   const zoneDragRef = useRef<ZoneDragState | null>(null);
+  const undoStackRef = useRef<LayerDto[][]>([]);
+  const redoStackRef = useRef<LayerDto[][]>([]);
+  const lastHistoryEditRef = useRef<{ time: number; index: number } | null>(
+    null
+  );
+  const isApplyingHistoryRef = useRef(false);
 
   const activePatch = useMemo(
     () => patches.find((p) => p.id === activePatchId) ?? patches[0],
@@ -415,8 +421,27 @@ export function App() {
       patch: Partial<LayerDto> & { paramsPatch?: Partial<SoundParamsDto> }
     ) => {
       cancelSnapshotAnim();
-      const layer = status?.layers[index];
-      if (!layer) return;
+      const currentLayers = status?.layers;
+      const layer = currentLayers?.[index];
+      if (!layer || !currentLayers) return;
+
+      if (!isApplyingHistoryRef.current) {
+        const now = performance.now();
+        const last = lastHistoryEditRef.current;
+        const shouldCoalesce =
+          last !== null && last.index === index && now - last.time < 450;
+        if (!shouldCoalesce) {
+          undoStackRef.current.push(
+            currentLayers.map((l) => ({ ...l, params: { ...l.params } }))
+          );
+          if (undoStackRef.current.length > 80) {
+            undoStackRef.current.shift();
+          }
+        }
+        lastHistoryEditRef.current = { time: now, index };
+        redoStackRef.current = [];
+      }
+
       const nextLayer: LayerDto = {
         ...layer,
         ...patch,
@@ -447,6 +472,81 @@ export function App() {
     },
     [status?.layers, cancelSnapshotAnim]
   );
+
+  const applyLayersSnapshot = useCallback(async (targetLayers: LayerDto[]) => {
+    isApplyingHistoryRef.current = true;
+    lastHistoryEditRef.current = null;
+    try {
+      setStatus((prev) => {
+        if (!prev) return prev;
+        const count = Math.min(targetLayers.length, prev.layers.length);
+        const nextLayers = prev.layers.map((cur, i) =>
+          i < count ? { ...cur, ...targetLayers[i] } : cur
+        );
+        return { ...prev, layers: nextLayers };
+      });
+      for (let i = 0; i < targetLayers.length; i++) {
+        const l = targetLayers[i];
+        await invoke("update_layer", {
+          index: i,
+          enabled: l.enabled,
+          volume: l.volume,
+          minNote: l.minNote,
+          maxNote: l.maxNote,
+          octaveShift: l.octaveShift,
+          params: l.params,
+        });
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      isApplyingHistoryRef.current = false;
+    }
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const current = status?.layers;
+    const prevSnapshot = undoStackRef.current.pop();
+    if (!current || !prevSnapshot) return;
+    redoStackRef.current.push(
+      current.map((l) => ({ ...l, params: { ...l.params } }))
+    );
+    void applyLayersSnapshot(prevSnapshot);
+  }, [status?.layers, applyLayersSnapshot]);
+
+  const handleRedo = useCallback(() => {
+    const current = status?.layers;
+    const nextSnapshot = redoStackRef.current.pop();
+    if (!current || !nextSnapshot) return;
+    undoStackRef.current.push(
+      current.map((l) => ({ ...l, params: { ...l.params } }))
+    );
+    void applyLayersSnapshot(nextSnapshot);
+  }, [status?.layers, applyLayersSnapshot]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        if (undoStackRef.current.length > 0) {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if ((key === "z" && e.shiftKey) || (key === "y" && !e.shiftKey)) {
+        if (redoStackRef.current.length > 0) {
+          e.preventDefault();
+          handleRedo();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleUndo, handleRedo]);
 
   const openLayerInspector = useCallback(
     (idx: number) => {
@@ -999,6 +1099,8 @@ export function App() {
           layers={layers}
           zoneDragRef={zoneDragRef}
           onUpdateLayer={handleUpdateLayer}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
           onOpenSoundPicker={setPickerTarget}
           onOpenLayerInspector={openLayerInspector}
         />

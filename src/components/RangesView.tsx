@@ -20,6 +20,8 @@ export function RangesView({
   layers,
   zoneDragRef,
   onUpdateLayer,
+  onUndo,
+  onRedo,
   onOpenSoundPicker,
   onOpenLayerInspector,
 }: {
@@ -29,6 +31,8 @@ export function RangesView({
     idx: number,
     patch: Partial<LayerDto> & { paramsPatch?: Partial<SoundParamsDto> }
   ) => void;
+  onUndo: () => void;
+  onRedo: () => void;
   onOpenSoundPicker: (target: number | "add") => void;
   onOpenLayerInspector: (idx: number) => void;
 }) {
@@ -46,6 +50,22 @@ export function RangesView({
           <button
             type="button"
             className="zones-btn"
+            onClick={onUndo}
+            title="Undo (⌘Z)"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            className="zones-btn"
+            onClick={onRedo}
+            title="Redo (⌘⇧Z)"
+          >
+            Redo
+          </button>
+          <button
+            type="button"
+            className="zones-btn"
             onClick={() => {
               layers.forEach((_, i) =>
                 onUpdateLayer(i, { minNote: 21, maxNote: 108 })
@@ -54,20 +74,6 @@ export function RangesView({
           >
             All Full 88
           </button>
-          {layers.length >= 2 && (
-            <button
-              type="button"
-              className="zones-btn"
-              onClick={() => {
-                onUpdateLayer(0, { minNote: 21, maxNote: 59 });
-                for (let i = 1; i < layers.length; i++) {
-                  onUpdateLayer(i, { minNote: 60, maxNote: 108 });
-                }
-              }}
-            >
-              Split @ C4
-            </button>
-          )}
           <button
             type="button"
             className="zones-btn primary"
