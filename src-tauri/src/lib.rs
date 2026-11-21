@@ -29,6 +29,7 @@ enum EngineCmd {
     SeekBackingTrack(u32),
     SetWorshipPad(bool, i8, Reply<StatusDto>),
     SetWorshipPadVolume(f32),
+    SetWorshipPadVoice(u8),
     SetSoundParams(SoundParams),
     AddLayer(String, Reply<StatusDto>),
     RemoveLayer(usize, Reply<StatusDto>),
@@ -262,6 +263,7 @@ struct StatusDto {
     worship_pad_enabled: bool,
     worship_pad_key: i8,
     worship_pad_volume: f32,
+    worship_pad_voice: u8,
     sound_params: SoundParamsDto,
     layers: Vec<LayerDto>,
 }
@@ -313,6 +315,7 @@ fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
         worship_pad_enabled: st.worship_pad_enabled,
         worship_pad_key: st.worship_pad_key,
         worship_pad_volume: st.worship_pad_volume,
+        worship_pad_voice: st.worship_pad_voice,
         sound_params: st.sound_params.into(),
         layers: st
             .layers
@@ -543,6 +546,14 @@ fn set_worship_pad_volume(state: State<'_, AppState>, volume: f32) -> Result<(),
 }
 
 #[tauri::command]
+fn set_worship_pad_voice(state: State<'_, AppState>, voice: u8) -> Result<(), String> {
+    state
+        .tx
+        .send(EngineCmd::SetWorshipPadVoice(voice))
+        .map_err(|_| "engine thread stopped".to_string())
+}
+
+#[tauri::command]
 fn set_sound_params(state: State<'_, AppState>, params: SoundParamsDto) -> Result<(), String> {
     state
         .tx
@@ -763,6 +774,9 @@ pub fn run() {
                         EngineCmd::SetWorshipPadVolume(vol) => {
                             engine.set_worship_pad_volume(vol);
                         }
+                        EngineCmd::SetWorshipPadVoice(voice) => {
+                            engine.set_worship_pad_voice(voice);
+                        }
                         EngineCmd::SetSoundParams(params) => {
                             engine.set_sound_params(params);
                         }
@@ -886,6 +900,7 @@ pub fn run() {
             seek_backing_track,
             set_worship_pad,
             set_worship_pad_volume,
+            set_worship_pad_voice,
             set_sound_params,
             add_layer,
             remove_layer,

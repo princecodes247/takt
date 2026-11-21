@@ -64,6 +64,7 @@ pub struct EngineStatus {
     pub worship_pad_enabled: bool,
     pub worship_pad_key: i8,
     pub worship_pad_volume: f32,
+    pub worship_pad_voice: u8,
     pub sound_params: SoundParams,
     pub layers: Vec<LayerInfo>,
 }
@@ -146,6 +147,7 @@ pub struct TaktEngine {
     pad_enabled: Arc<AtomicBool>,
     pad_key: Arc<AtomicI8>,
     pad_volume: Arc<AtomicU32>,
+    pad_voice: Arc<AtomicU8>,
 }
 
 impl TaktEngine {
@@ -202,6 +204,7 @@ impl TaktEngine {
             pad_enabled: Arc::new(AtomicBool::new(false)),
             pad_key: Arc::new(AtomicI8::new(0)),
             pad_volume: Arc::new(AtomicU32::new(0.55_f32.to_bits())),
+            pad_voice: Arc::new(AtomicU8::new(0)),
         };
 
         engine.restart_audio_stream()?;
@@ -465,6 +468,10 @@ impl TaktEngine {
             .store(volume.clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
     }
 
+    pub fn set_worship_pad_voice(&self, voice: u8) {
+        self.pad_voice.store(voice.min(5), Ordering::Relaxed);
+    }
+
     pub fn set_sound_params(&self, params: SoundParams) {
         if let Some(slot) = self.layer_slots.first() {
             slot.atomics.params.store(params);
@@ -562,6 +569,7 @@ impl TaktEngine {
             worship_pad_enabled: self.pad_enabled.load(Ordering::Relaxed),
             worship_pad_key: self.pad_key.load(Ordering::Relaxed),
             worship_pad_volume: f32::from_bits(self.pad_volume.load(Ordering::Relaxed)),
+            worship_pad_voice: self.pad_voice.load(Ordering::Relaxed),
             sound_params,
             layers,
         }
@@ -630,6 +638,7 @@ impl TaktEngine {
             Arc::clone(&self.pad_key),
             Arc::clone(&self.pad_enabled),
             Arc::clone(&self.pad_volume),
+            Arc::clone(&self.pad_voice),
         );
         let volume_atomic = Arc::clone(&self.master_volume);
         let playing_atomic = Arc::clone(&self.is_playing);

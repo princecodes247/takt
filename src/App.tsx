@@ -87,6 +87,7 @@ interface StatusDto {
   worshipPadEnabled: boolean;
   worshipPadKey: number;
   worshipPadVolume: number;
+  worshipPadVoice?: number;
   soundParams: SoundParamsDto;
   layers: LayerDto[];
 }
@@ -145,6 +146,15 @@ interface TelemetryDto {
   backingTrackPositionMs: number;
   backingTrackDurationMs: number;
 }
+
+const WORSHIP_PAD_VOICES = [
+  { value: "0", label: "1. Warm" },
+  { value: "1", label: "2. Shimmer" },
+  { value: "2", label: "3. Organ" },
+  { value: "3", label: "4. Deep Sub" },
+  { value: "4", label: "5. Airy Choir" },
+  { value: "5", label: "6. Bright Analog" },
+];
 
 const WORSHIP_KEYS = [
   "C",
@@ -476,6 +486,7 @@ function CustomSelect({
   options,
   onChange,
   className = "",
+  menuUp = false,
 }: {
   id?: string;
   ariaLabel?: string;
@@ -483,6 +494,7 @@ function CustomSelect({
   options: CustomSelectOption[];
   onChange: (value: string) => void;
   className?: string;
+  menuUp?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -511,7 +523,7 @@ function CustomSelect({
   return (
     <div
       ref={wrapRef}
-      className={`custom-select ${open ? "open" : ""} ${className}`}
+      className={`custom-select ${open ? "open" : ""} ${menuUp ? "menu-up" : ""} ${className}`}
     >
       <button
         id={id}
@@ -2297,51 +2309,83 @@ export default function App() {
             </section>
 
             <section className="sidebar-card pad-track-card">
-              <div className="sub-tabs" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={leftTab === "pad"}
-                  className={`sub-tab ${leftTab === "pad" ? "active" : ""}`}
-                  onClick={() => setLeftTab("pad")}
-                >
-                  <span
-                    className={`mini-dot ${status?.worshipPadEnabled ? "on" : ""}`}
-                  />
-                  Worship Pad
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={leftTab === "track"}
-                  className={`sub-tab ${leftTab === "track" ? "active" : ""}`}
-                  onClick={() => setLeftTab("track")}
-                >
-                  <span
-                    className={`mini-dot ${status?.backingTrackPlaying ? "on" : ""}`}
-                  />
-                  Backing Track
-                </button>
+              <div className="pad-card-header">
+                <div className="sub-tabs" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={leftTab === "pad"}
+                    className={`sub-tab ${leftTab === "pad" ? "active" : ""}`}
+                    onClick={() => setLeftTab("pad")}
+                  >
+                    <span
+                      className={`mini-dot ${status?.worshipPadEnabled ? "on" : ""}`}
+                    />
+                    Pad
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={leftTab === "track"}
+                    className={`sub-tab ${leftTab === "track" ? "active" : ""}`}
+                    onClick={() => setLeftTab("track")}
+                  >
+                    <span
+                      className={`mini-dot ${status?.backingTrackPlaying ? "on" : ""}`}
+                    />
+                    Track
+                  </button>
+                </div>
+                <span className="vol-readout">
+                  {leftTab === "pad" ? `${padVolPct}%` : `${trackVolPct}%`}
+                </span>
               </div>
 
               {leftTab === "pad" ? (
                 <div className="pad-module">
-                  <div className="pad-top-row">
+                  <div className="pad-voice-bar">
                     <button
                       type="button"
                       role="switch"
                       aria-checked={status?.worshipPadEnabled ?? false}
-                      className={`pad-pwr-btn ${status?.worshipPadEnabled ? "on" : ""}`}
+                      aria-label={
+                        status?.worshipPadEnabled
+                          ? "Turn Worship Pad Off"
+                          : "Turn Worship Pad On"
+                      }
+                      title={
+                        status?.worshipPadEnabled ? "Pad ON" : "Pad OFF"
+                      }
+                      className={`pad-split-pwr ${status?.worshipPadEnabled ? "on" : ""}`}
                       onClick={handleWorshipPadToggle}
                     >
-                      <span className="pad-pwr-icon" aria-hidden="true">
-                        ⏻
-                      </span>
-                      <span>
-                        {status?.worshipPadEnabled ? "Pad ON" : "Pad OFF"}
-                      </span>
+                      <svg
+                        viewBox="0 0 24 24"
+                        width="14"
+                        height="14"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                      >
+                        <path d="M12 3v9" />
+                        <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                      </svg>
                     </button>
-                    <span className="vol-readout">{padVolPct}%</span>
+                    <CustomSelect
+                      ariaLabel="Worship Pad Voice"
+                      className="pad-voice-select"
+                      menuUp
+                      value={String(status?.worshipPadVoice ?? 0)}
+                      options={WORSHIP_PAD_VOICES}
+                      onChange={(val) => {
+                        const voice = Number(val);
+                        setStatus((prev) =>
+                          prev ? { ...prev, worshipPadVoice: voice } : prev
+                        );
+                        void invoke("set_worship_pad_voice", { voice });
+                      }}
+                    />
                   </div>
 
                   <div className="pad-body">
@@ -2418,74 +2462,123 @@ export default function App() {
                 </div>
               ) : (
                 <div className="track-module">
-                  <div className="track-controls-row">
-                    <input
-                      ref={trackInputRef}
-                      type="file"
-                      accept=".wav,.flac,.ogg,audio/wav,audio/flac,audio/ogg"
-                      style={{ display: "none" }}
-                      onChange={handleTrackFileSelected}
-                    />
-                    <button
-                      type="button"
-                      className="btn-mini"
-                      onClick={() => trackInputRef.current?.click()}
-                    >
-                      Load
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn-mini ${status?.backingTrackLoop ? "active" : ""}`}
-                      onClick={handleTrackLoopToggle}
-                    >
-                      Loop
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn-mini ${status?.backingTrackPlaying ? "active" : ""}`}
-                      onClick={handleTrackPlayToggle}
-                      disabled={!status?.backingTrackName}
-                    >
-                      {status?.backingTrackPlaying ? "Pause" : "Play"}
-                    </button>
-                  </div>
-
-                  <div className="track-meta">
-                    <span
-                      className="track-name"
-                      title={status?.backingTrackName ?? ""}
-                    >
-                      {status?.backingTrackName ?? "No track loaded"}
-                    </span>
-                    <span className="track-time">
-                      {formatTimeMs(trackPos)} /{" "}
-                      {formatTimeMs(status?.backingTrackDurationMs ?? 0)}
-                    </span>
-                  </div>
-
                   <input
-                    type="range"
-                    className="seek-bar"
-                    style={
-                      { "--fill": `${trackSeekPct}%` } as React.CSSProperties
-                    }
-                    aria-label="Backing Track Progress"
-                    min={0}
-                    max={trackDuration}
-                    value={trackPos}
-                    disabled={!status?.backingTrackName}
-                    onChange={(e) => handleTrackSeek(Number(e.target.value))}
+                    ref={trackInputRef}
+                    type="file"
+                    accept=".wav,.flac,.ogg,audio/wav,audio/flac,audio/ogg"
+                    style={{ display: "none" }}
+                    onChange={handleTrackFileSelected}
                   />
+                  <div className="track-body">
+                    <div className="track-main">
+                      <div className="track-info-card">
+                        <div className="track-info-text">
+                          <span
+                            className="track-name"
+                            title={status?.backingTrackName ?? ""}
+                          >
+                            {status?.backingTrackName ?? "No track loaded"}
+                          </span>
+                          <span className="track-time">
+                            {formatTimeMs(trackPos)} /{" "}
+                            {formatTimeMs(
+                              status?.backingTrackDurationMs ?? 0
+                            )}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="track-load-btn"
+                          onClick={() => trackInputRef.current?.click()}
+                          title="Load Backing Track (.wav, .flac, .ogg)"
+                        >
+                          Load
+                        </button>
+                      </div>
 
-                  <ParamSlider
-                    label="Track Vol"
-                    displayValue={`${trackVolPct}%`}
-                    value={trackVolPct}
-                    min={0}
-                    max={125}
-                    onChange={handleTrackVolumeChange}
-                    onReset={() => handleTrackVolumeChange(75)}
-                  />
+                      <input
+                        type="range"
+                        className="sk-seek-bar"
+                        style={
+                          { "--fill": `${trackSeekPct}%` } as React.CSSProperties
+                        }
+                        aria-label="Backing Track Progress"
+                        min={0}
+                        max={trackDuration}
+                        value={trackPos}
+                        disabled={!status?.backingTrackName}
+                        onChange={(e) =>
+                          handleTrackSeek(Number(e.target.value))
+                        }
+                      />
+
+                      <div className="track-transport-row">
+                        <button
+                          type="button"
+                          className={`track-btn play ${status?.backingTrackPlaying ? "active" : ""}`}
+                          onClick={handleTrackPlayToggle}
+                          disabled={!status?.backingTrackName}
+                        >
+                          {status?.backingTrackPlaying ? "⏸ Pause" : "▶ Play"}
+                        </button>
+                        <button
+                          type="button"
+                          className={`track-btn ${status?.backingTrackLoop ? "active" : ""}`}
+                          onClick={handleTrackLoopToggle}
+                        >
+                          ↻ Loop
+                        </button>
+                      </div>
+                    </div>
+
+                    <div
+                      className="sk-fader compact"
+                      style={{ "--layer-color": "#89a8f0" } as React.CSSProperties}
+                      role="slider"
+                      tabIndex={0}
+                      aria-label="Backing Track Volume"
+                      aria-valuemin={0}
+                      aria-valuemax={125}
+                      aria-valuenow={trackVolPct}
+                      onPointerDown={(e) => {
+                        if (e.detail >= 2) {
+                          handleTrackVolumeChange(75);
+                          return;
+                        }
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const ratio = 1 - (e.clientY - rect.top) / rect.height;
+                        handleTrackVolumeChange(
+                          Math.round(Math.max(0, Math.min(1, ratio)) * 125)
+                        );
+                      }}
+                      onPointerMove={(e) => {
+                        if (e.buttons !== 1) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const ratio = 1 - (e.clientY - rect.top) / rect.height;
+                        handleTrackVolumeChange(
+                          Math.round(Math.max(0, Math.min(1, ratio)) * 125)
+                        );
+                      }}
+                      onDoubleClick={() => handleTrackVolumeChange(75)}
+                    >
+                      <div className="sk-fader-groove" aria-hidden="true">
+                        <div
+                          className="sk-fader-glow"
+                          style={{ height: `${(trackVolPct / 125) * 100}%` }}
+                        />
+                      </div>
+                      <div
+                        className="sk-fader-thumb"
+                        style={{
+                          bottom: `calc(${(trackVolPct / 125) * 100}% - 10px)`,
+                        }}
+                        aria-hidden="true"
+                      >
+                        <span className="sk-fader-led" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </section>

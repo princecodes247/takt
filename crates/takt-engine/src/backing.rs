@@ -161,6 +161,7 @@ pub struct WorshipPadPlayer {
     target_key: Arc<AtomicI8>,
     enabled: Arc<AtomicBool>,
     volume: Arc<AtomicU32>,
+    voice: Arc<std::sync::atomic::AtomicU8>,
 }
 
 impl WorshipPadPlayer {
@@ -168,6 +169,7 @@ impl WorshipPadPlayer {
         target_key: Arc<AtomicI8>,
         enabled: Arc<AtomicBool>,
         volume: Arc<AtomicU32>,
+        voice: Arc<std::sync::atomic::AtomicU8>,
     ) -> Self {
         Self {
             slots: [PadSlot::default(); 2],
@@ -177,6 +179,7 @@ impl WorshipPadPlayer {
             target_key,
             enabled,
             volume,
+            voice,
         }
     }
 
@@ -216,8 +219,14 @@ impl WorshipPadPlayer {
         let ch = channels.max(1) as usize;
         let num_frames = output.len() / ch;
         let vol = f32::from_bits(self.volume.load(Ordering::Relaxed));
+        let voice = self.voice.load(Ordering::Relaxed);
         let fade_step = 1.0 / (sample_rate as f32 * 1.4).max(1.0);
-        let lfo_inc = 0.14 / sample_rate as f32;
+        let lfo_rate = match voice {
+            1 => 0.22, // Shimmer
+            4 => 0.18, // Airy Choir
+            _ => 0.14,
+        };
+        let lfo_inc = lfo_rate / sample_rate as f32;
         let sr = sample_rate as f64;
 
         for frame_idx in 0..num_frames {
@@ -245,25 +254,91 @@ impl WorshipPadPlayer {
                 let f_root = f_sub * 2.0;
                 let f_fifth = f_root * 1.498_307; // 7 semitones
                 let f_oct = f_root * 2.0;
+                let f_hi_fifth = f_oct * 1.498_307;
 
-                let freqs = [
-                    f_sub,
-                    f_root * 0.9975,
-                    f_root * 1.0025,
-                    f_fifth * 0.9985,
-                    f_fifth * 1.0015,
-                    f_oct,
-                ];
+                let detune = match voice {
+                    5 => 0.0045, // Bright Analog: wider detune
+                    1 | 4 => 0.0032,
+                    _ => 0.0025,
+                };
+
+                let freqs = match voice {
+                    1 => [
+                        f_sub,
+                        f_root * (1.0 - detune),
+                        f_root * (1.0 + detune),
+                        f_oct * 0.9985,
+                        f_oct * 1.0015,
+                        f_hi_fifth,
+                    ],
+                    2 => [
+                        f_sub,
+                        f_root,
+                        f_fifth,
+                        f_oct,
+                        f_hi_fifth,
+                        f_oct * 2.0,
+                    ],
+                    _ => [
+                        f_sub,
+                        f_root * (1.0 - detune),
+                        f_root * (1.0 + detune),
+                        f_fifth * 0.9985,
+                        f_fifth * 1.0015,
+                        f_oct,
+                    ],
+                };
 
                 let mut s = [0.0_f32; 6];
                 for i in 0..6 {
-                    s[i] = (slot.phases[i] as f32 * TAU).sin();
+                    let ph = slot.phases[i] as f32;
+                    s[i] = match voice {
+                        // Bright Analog: warm saturated saw-like blend
+                        5 => {
+                            let sine = (ph * TAU).sin();
+                            let tri = (ph * 2.0 * TAU).sin() * 0.35 + (ph * 3.0 * TAU).sin() * 0.16;
+                            (sine + tri) * 0.78
+                        }
+                        // Organ: drawbar-like 1st + 2nd harmonic warmth
+                        2 => (ph * TAU).sin() * 0.85 + (ph * 2.0 * TAU).sin() * 0.22,
+                        _ => (ph * TAU).sin(),
+                    };
                     slot.phases[i] = (slot.phases[i] + freqs[i] / sr).fract();
                 }
 
                 let env = slot.gain * slot.gain * 0.22; // smooth equal-power-like curve
-                let l = (s[0] * 0.35 + s[1] * 0.42 + s[2] * 0.18 + s[3] * 0.28 + s[5] * 0.16 * shimmer_lfo) * env;
-                let r = (s[0] * 0.35 + s[2] * 0.42 + s[1] * 0.18 + s[4] * 0.28 + s[5] * 0.16 * shimmer_lfo) * env;
+                let (l, r) = match voice {
+                    // 1: Shimmer (lush high octave + fifth swell)
+                    1 => (
+                        (s[0] * 0.25 + s[1] * 0.34 + s[2] * 0.16 + s[3] * 0.30 * shimmer_lfo + s[5] * 0.24 * shimmer_lfo) * env,
+                        (s[0] * 0.25 + s[2] * 0.34 + s[1] * 0.16 + s[4] * 0.30 * shimmer_lfo + s[5] * 0.24 * shimmer_lfo) * env,
+                    ),
+                    // 2: Organ (rich drawbar balance)
+                    2 => (
+                        (s[0] * 0.36 + s[1] * 0.36 + s[2] * 0.26 + s[3] * 0.24 + s[4] * 0.14 + s[5] * 0.08) * env,
+                        (s[0] * 0.36 + s[1] * 0.36 + s[2] * 0.26 + s[3] * 0.24 + s[4] * 0.14 + s[5] * 0.08) * env,
+                    ),
+                    // 3: Deep Sub (warm low foundation)
+                    3 => (
+                        (s[0] * 0.62 + s[1] * 0.34 + s[2] * 0.18 + s[3] * 0.14) * env,
+                        (s[0] * 0.62 + s[2] * 0.34 + s[1] * 0.18 + s[4] * 0.14) * env,
+                    ),
+                    // 4: Airy Choir (wide fifth + breathing upper octave)
+                    4 => (
+                        (s[0] * 0.22 + s[1] * 0.32 + s[3] * 0.36 + s[5] * 0.28 * shimmer_lfo) * env,
+                        (s[0] * 0.22 + s[2] * 0.32 + s[4] * 0.36 + s[5] * 0.28 * shimmer_lfo) * env,
+                    ),
+                    // 5: Bright Analog
+                    5 => (
+                        (s[0] * 0.30 + s[1] * 0.44 + s[2] * 0.22 + s[3] * 0.26 + s[5] * 0.22 * shimmer_lfo) * env,
+                        (s[0] * 0.30 + s[2] * 0.44 + s[1] * 0.22 + s[4] * 0.26 + s[5] * 0.22 * shimmer_lfo) * env,
+                    ),
+                    // 0: Warm (default)
+                    _ => (
+                        (s[0] * 0.35 + s[1] * 0.42 + s[2] * 0.18 + s[3] * 0.28 + s[5] * 0.16 * shimmer_lfo) * env,
+                        (s[0] * 0.35 + s[2] * 0.42 + s[1] * 0.18 + s[4] * 0.28 + s[5] * 0.16 * shimmer_lfo) * env,
+                    ),
+                };
                 pad_l += l;
                 pad_r += r;
             }
