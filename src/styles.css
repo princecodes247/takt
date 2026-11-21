@@ -1424,41 +1424,72 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 }
 
 .chord-readout-wrap {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .chord-label {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: #6b7280;
 }
 
 .chord-badge {
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   font-weight: 700;
-  padding: 3px 11px;
-  min-width: 66px;
-  text-align: center;
-  border-radius: 6px;
-  background: #1d212c;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #9ca3af;
+  color: #6b7280;
+  min-width: 24px;
 }
 
 .chord-badge.active {
-  border-color: rgba(137, 168, 240, 0.65);
   color: #c7d9ff;
-  background: rgba(137, 168, 240, 0.16);
 }
 
 .keyboard-controls {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.kb-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 2px;
+}
+
+.kb-typing-group {
+  height: 27px;
+  display: inline-flex;
+  align-items: center;
+  background: #1e222e;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.kb-group-toggle {
+  height: 100%;
+  width: 28px;
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.kb-group-toggle:hover {
+  color: #ffffff;
+}
+
+.kb-group-toggle.on {
+  background: #c7d9ff;
+  color: #111827;
 }
 
 .kb-pill {

@@ -3194,13 +3194,10 @@ export default function App() {
               {chordDetectEnabled && (
                 <div className="chord-readout-wrap" aria-live="polite">
                   <span className="chord-label">Chord</span>
-                  <div className={`chord-badge ${detectedChord ? "active" : ""}`}>
+                  <span className={`chord-badge ${detectedChord ? "active" : ""}`}>
                     {detectedChord ?? "—"}
-                  </div>
+                  </span>
                 </div>
-              )}
-              {keyboardEnabled && (
-                <span className="keyboard-hint">Z/X octave · A–&apos; play</span>
               )}
             </div>
 
@@ -3209,7 +3206,7 @@ export default function App() {
                 type="button"
                 aria-pressed={Boolean(status?.sustainActive)}
                 className={`kb-pill sustain-pill ${status?.sustainActive ? "on" : ""}`}
-                title="Toggle Sustain (CC 64) · also lights up when sustain pedal is stepped on"
+                title="Toggle Sustain (CC 64) · lights up when sustain pedal is pressed"
                 onClick={() => {
                   const next = !status?.sustainActive;
                   setStatus((prev) =>
@@ -3239,8 +3236,13 @@ export default function App() {
                 type="button"
                 role="switch"
                 aria-checked={chordDetectEnabled}
-                className={`kb-pill ${chordDetectEnabled ? "on" : ""}`}
-                title="Toggle live Chord Detection"
+                aria-label="Toggle Chord Detection"
+                className={`kb-pill kb-icon-only ${chordDetectEnabled ? "on" : ""}`}
+                title={
+                  chordDetectEnabled
+                    ? "Chord Detection ON"
+                    : "Chord Detection OFF"
+                }
                 onClick={() => setChordDetectEnabled((v) => !v)}
               >
                 <svg
@@ -3258,62 +3260,65 @@ export default function App() {
                   <circle cx="6" cy="18" r="3" />
                   <circle cx="18" cy="16" r="3" />
                 </svg>
-                <span>Chord</span>
               </button>
 
-              <div
-                className={`octave-stepper ${keyboardEnabled ? "" : "dimmed"}`}
-                title="Computer keyboard octave (Z / X)"
-              >
+              <span className="kb-divider" aria-hidden="true" />
+
+              <div className="kb-typing-group">
                 <button
                   type="button"
-                  className="step-btn"
-                  onClick={() => setOctave((o) => Math.max(0, o - 1))}
-                  disabled={!keyboardEnabled || octave <= 0}
-                  aria-label="Octave Down"
+                  role="switch"
+                  aria-checked={keyboardEnabled}
+                  aria-label="Toggle Computer Keyboard"
+                  className={`kb-group-toggle ${keyboardEnabled ? "on" : ""}`}
+                  title="Computer keyboard playback (Z/X octave · A–' play)"
+                  onClick={() => setKeyboardEnabled((v) => !v)}
                 >
-                  −
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="13"
+                    height="13"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <rect x="2" y="6" width="20" height="12" rx="2" />
+                    <line x1="6" y1="10" x2="6.01" y2="10" />
+                    <line x1="10" y1="10" x2="10.01" y2="10" />
+                    <line x1="14" y1="10" x2="14.01" y2="10" />
+                    <line x1="18" y1="10" x2="18.01" y2="10" />
+                    <line x1="8" y1="14" x2="16" y2="14" />
+                  </svg>
                 </button>
-                <span className="octave-readout">C{octave}</span>
-                <button
-                  type="button"
-                  className="step-btn"
-                  onClick={() => setOctave((o) => Math.min(7, o + 1))}
-                  disabled={!keyboardEnabled || octave >= 7}
-                  aria-label="Octave Up"
-                >
-                  +
-                </button>
+                {keyboardEnabled && (
+                  <>
+                    <button
+                      type="button"
+                      className="step-btn"
+                      onClick={() => setOctave((o) => Math.max(0, o - 1))}
+                      disabled={octave <= 0}
+                      aria-label="Octave Down"
+                      title="Octave Down (Z)"
+                    >
+                      −
+                    </button>
+                    <span className="octave-readout">C{octave}</span>
+                    <button
+                      type="button"
+                      className="step-btn"
+                      onClick={() => setOctave((o) => Math.min(7, o + 1))}
+                      disabled={octave >= 7}
+                      aria-label="Octave Up"
+                      title="Octave Up (X)"
+                    >
+                      +
+                    </button>
+                  </>
+                )}
               </div>
-
-              <button
-                type="button"
-                role="switch"
-                aria-checked={keyboardEnabled}
-                className={`kb-pill ${keyboardEnabled ? "on" : ""}`}
-                title="Toggle computer QWERTY keyboard playback"
-                onClick={() => setKeyboardEnabled((v) => !v)}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="13"
-                  height="13"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <rect x="2" y="6" width="20" height="12" rx="2" />
-                  <line x1="6" y1="10" x2="6.01" y2="10" />
-                  <line x1="10" y1="10" x2="10.01" y2="10" />
-                  <line x1="14" y1="10" x2="14.01" y2="10" />
-                  <line x1="18" y1="10" x2="18.01" y2="10" />
-                  <line x1="8" y1="14" x2="16" y2="14" />
-                </svg>
-                <span>{keyboardEnabled ? "Keys" : "Keys Off"}</span>
-              </button>
 
               <button
                 type="button"
