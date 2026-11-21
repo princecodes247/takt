@@ -546,16 +546,20 @@ input:focus-visible {
 .pad-voice-bar {
   display: flex;
   align-items: stretch;
-  gap: 6px;
+  gap: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #252936;
 }
 
 .pad-split-pwr {
-  width: 34px;
+  width: 36px;
   flex-shrink: 0;
-  border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #212531;
-  color: #9ca3af;
+  border: none;
+  border-right: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 6px 0 0 6px;
+  background: #212530;
+  color: #6b7280;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -563,15 +567,12 @@ input:focus-visible {
 }
 
 .pad-split-pwr:hover {
-  border-color: rgba(137, 168, 240, 0.6);
   color: #e5e7eb;
 }
 
 .pad-split-pwr.on {
   background: #89a8f0;
-  border-color: #89a8f0;
   color: #111827;
-  box-shadow: 0 0 10px rgba(137, 168, 240, 0.35);
 }
 
 .pad-voice-select {
@@ -580,8 +581,16 @@ input:focus-visible {
 }
 
 .pad-voice-select .custom-select-trigger {
+  border: none;
+  border-radius: 0 6px 6px 0;
+  background: transparent;
   padding: 6px 9px;
   font-size: 0.78rem;
+}
+
+.pad-voice-select .custom-select-trigger:hover,
+.pad-voice-select.open .custom-select-trigger {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .pad-top-row {
@@ -633,9 +642,35 @@ input:focus-visible {
 
 .pad-body {
   display: grid;
-  grid-template-columns: 1fr 38px;
+  grid-template-columns: 1fr 40px;
   gap: 8px;
   align-items: stretch;
+}
+
+.pad-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-fader-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-fader-col .sk-fader.compact {
+  flex: 1 1 auto;
+  min-height: 92px;
+}
+
+.sidebar-fader-val {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #9ca3af;
+  line-height: 1;
 }
 
 .pad-key-grid-4x3 {
@@ -689,7 +724,7 @@ input:focus-visible {
 
 .track-body {
   display: grid;
-  grid-template-columns: 1fr 38px;
+  grid-template-columns: 1fr 40px;
   gap: 8px;
   align-items: stretch;
   min-height: 142px;
@@ -781,8 +816,15 @@ input[type="range"].sk-seek-bar::-webkit-slider-thumb {
 
 .track-transport-row {
   display: grid;
-  grid-template-columns: 1.3fr 1fr;
+  grid-template-columns: 1fr 38px;
   gap: 6px;
+}
+
+.track-loop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .track-btn {

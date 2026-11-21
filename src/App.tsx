@@ -2309,86 +2309,81 @@ export default function App() {
             </section>
 
             <section className="sidebar-card pad-track-card">
-              <div className="pad-card-header">
-                <div className="sub-tabs" role="tablist">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={leftTab === "pad"}
-                    className={`sub-tab ${leftTab === "pad" ? "active" : ""}`}
-                    onClick={() => setLeftTab("pad")}
-                  >
-                    <span
-                      className={`mini-dot ${status?.worshipPadEnabled ? "on" : ""}`}
-                    />
-                    Pad
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={leftTab === "track"}
-                    className={`sub-tab ${leftTab === "track" ? "active" : ""}`}
-                    onClick={() => setLeftTab("track")}
-                  >
-                    <span
-                      className={`mini-dot ${status?.backingTrackPlaying ? "on" : ""}`}
-                    />
-                    Track
-                  </button>
-                </div>
-                <span className="vol-readout">
-                  {leftTab === "pad" ? `${padVolPct}%` : `${trackVolPct}%`}
-                </span>
+              <div className="sub-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={leftTab === "pad"}
+                  className={`sub-tab ${leftTab === "pad" ? "active" : ""}`}
+                  onClick={() => setLeftTab("pad")}
+                >
+                  <span
+                    className={`mini-dot ${status?.worshipPadEnabled ? "on" : ""}`}
+                  />
+                  Pad
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={leftTab === "track"}
+                  className={`sub-tab ${leftTab === "track" ? "active" : ""}`}
+                  onClick={() => setLeftTab("track")}
+                >
+                  <span
+                    className={`mini-dot ${status?.backingTrackPlaying ? "on" : ""}`}
+                  />
+                  Track
+                </button>
               </div>
 
               {leftTab === "pad" ? (
-                <div className="pad-module">
-                  <div className="pad-voice-bar">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={status?.worshipPadEnabled ?? false}
-                      aria-label={
-                        status?.worshipPadEnabled
-                          ? "Turn Worship Pad Off"
-                          : "Turn Worship Pad On"
-                      }
-                      title={
-                        status?.worshipPadEnabled ? "Pad ON" : "Pad OFF"
-                      }
-                      className={`pad-split-pwr ${status?.worshipPadEnabled ? "on" : ""}`}
-                      onClick={handleWorshipPadToggle}
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="14"
-                        height="14"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.2"
-                        strokeLinecap="round"
+                <div className="pad-body">
+                  <div className="pad-main">
+                    <div className="pad-voice-bar">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={status?.worshipPadEnabled ?? false}
+                        aria-label={
+                          status?.worshipPadEnabled
+                            ? "Turn Worship Pad Off"
+                            : "Turn Worship Pad On"
+                        }
+                        title={
+                          status?.worshipPadEnabled ? "Pad ON" : "Pad OFF"
+                        }
+                        className={`pad-split-pwr ${status?.worshipPadEnabled ? "on" : ""}`}
+                        onClick={handleWorshipPadToggle}
                       >
-                        <path d="M12 3v9" />
-                        <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-                      </svg>
-                    </button>
-                    <CustomSelect
-                      ariaLabel="Worship Pad Voice"
-                      className="pad-voice-select"
-                      menuUp
-                      value={String(status?.worshipPadVoice ?? 0)}
-                      options={WORSHIP_PAD_VOICES}
-                      onChange={(val) => {
-                        const voice = Number(val);
-                        setStatus((prev) =>
-                          prev ? { ...prev, worshipPadVoice: voice } : prev
-                        );
-                        void invoke("set_worship_pad_voice", { voice });
-                      }}
-                    />
-                  </div>
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="14"
+                          height="14"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                        >
+                          <path d="M12 3v9" />
+                          <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                        </svg>
+                      </button>
+                      <CustomSelect
+                        ariaLabel="Worship Pad Voice"
+                        className="pad-voice-select"
+                        menuUp
+                        value={String(status?.worshipPadVoice ?? 0)}
+                        options={WORSHIP_PAD_VOICES}
+                        onChange={(val) => {
+                          const voice = Number(val);
+                          setStatus((prev) =>
+                            prev ? { ...prev, worshipPadVoice: voice } : prev
+                          );
+                          void invoke("set_worship_pad_voice", { voice });
+                        }}
+                      />
+                    </div>
 
-                  <div className="pad-body">
                     <div
                       className="pad-key-grid-4x3"
                       role="group"
@@ -2411,6 +2406,9 @@ export default function App() {
                         );
                       })}
                     </div>
+                  </div>
+
+                  <div className="sidebar-fader-col">
                     <div
                       className="sk-fader compact"
                       style={{ "--layer-color": "#89a8f0" } as React.CSSProperties}
@@ -2458,6 +2456,7 @@ export default function App() {
                         <span className="sk-fader-led" />
                       </div>
                     </div>
+                    <span className="sidebar-fader-val">{padVolPct}%</span>
                   </div>
                 </div>
               ) : (
@@ -2523,60 +2522,85 @@ export default function App() {
                         </button>
                         <button
                           type="button"
-                          className={`track-btn ${status?.backingTrackLoop ? "active" : ""}`}
+                          className={`track-btn track-loop-btn ${status?.backingTrackLoop ? "active" : ""}`}
                           onClick={handleTrackLoopToggle}
+                          aria-label="Toggle Loop"
+                          aria-pressed={Boolean(status?.backingTrackLoop)}
+                          title={
+                            status?.backingTrackLoop ? "Loop ON" : "Loop OFF"
+                          }
                         >
-                          ↻ Loop
+                          <svg
+                            viewBox="0 0 24 24"
+                            width="15"
+                            height="15"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.1"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <polyline points="17 1 21 5 17 9" />
+                            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                            <polyline points="7 23 3 19 7 15" />
+                            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                          </svg>
                         </button>
                       </div>
                     </div>
 
-                    <div
-                      className="sk-fader compact"
-                      style={{ "--layer-color": "#89a8f0" } as React.CSSProperties}
-                      role="slider"
-                      tabIndex={0}
-                      aria-label="Backing Track Volume"
-                      aria-valuemin={0}
-                      aria-valuemax={125}
-                      aria-valuenow={trackVolPct}
-                      onPointerDown={(e) => {
-                        if (e.detail >= 2) {
-                          handleTrackVolumeChange(75);
-                          return;
-                        }
-                        e.currentTarget.setPointerCapture(e.pointerId);
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const ratio = 1 - (e.clientY - rect.top) / rect.height;
-                        handleTrackVolumeChange(
-                          Math.round(Math.max(0, Math.min(1, ratio)) * 125)
-                        );
-                      }}
-                      onPointerMove={(e) => {
-                        if (e.buttons !== 1) return;
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const ratio = 1 - (e.clientY - rect.top) / rect.height;
-                        handleTrackVolumeChange(
-                          Math.round(Math.max(0, Math.min(1, ratio)) * 125)
-                        );
-                      }}
-                      onDoubleClick={() => handleTrackVolumeChange(75)}
-                    >
-                      <div className="sk-fader-groove" aria-hidden="true">
-                        <div
-                          className="sk-fader-glow"
-                          style={{ height: `${(trackVolPct / 125) * 100}%` }}
-                        />
-                      </div>
+                    <div className="sidebar-fader-col">
                       <div
-                        className="sk-fader-thumb"
-                        style={{
-                          bottom: `calc(${(trackVolPct / 125) * 100}% - 10px)`,
+                        className="sk-fader compact"
+                        style={{ "--layer-color": "#89a8f0" } as React.CSSProperties}
+                        role="slider"
+                        tabIndex={0}
+                        aria-label="Backing Track Volume"
+                        aria-valuemin={0}
+                        aria-valuemax={125}
+                        aria-valuenow={trackVolPct}
+                        onPointerDown={(e) => {
+                          if (e.detail >= 2) {
+                            handleTrackVolumeChange(75);
+                            return;
+                          }
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const ratio =
+                            1 - (e.clientY - rect.top) / rect.height;
+                          handleTrackVolumeChange(
+                            Math.round(Math.max(0, Math.min(1, ratio)) * 125)
+                          );
                         }}
-                        aria-hidden="true"
+                        onPointerMove={(e) => {
+                          if (e.buttons !== 1) return;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const ratio =
+                            1 - (e.clientY - rect.top) / rect.height;
+                          handleTrackVolumeChange(
+                            Math.round(Math.max(0, Math.min(1, ratio)) * 125)
+                          );
+                        }}
+                        onDoubleClick={() => handleTrackVolumeChange(75)}
                       >
-                        <span className="sk-fader-led" />
+                        <div className="sk-fader-groove" aria-hidden="true">
+                          <div
+                            className="sk-fader-glow"
+                            style={{ height: `${(trackVolPct / 125) * 100}%` }}
+                          />
+                        </div>
+                        <div
+                          className="sk-fader-thumb"
+                          style={{
+                            bottom: `calc(${(trackVolPct / 125) * 100}% - 10px)`,
+                          }}
+                          aria-hidden="true"
+                        >
+                          <span className="sk-fader-led" />
+                        </div>
                       </div>
+                      <span className="sidebar-fader-val">{trackVolPct}%</span>
                     </div>
                   </div>
                 </div>
