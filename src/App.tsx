@@ -2507,8 +2507,12 @@ export default function App() {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const ratio = 1 - (e.clientY - rect.top) / rect.height;
                   const clamped = Math.max(0, Math.min(1, ratio));
+                  let nextVol = Math.round(clamped * 125) / 100;
+                  if (Math.abs(nextVol - 0.85) <= 0.025) {
+                    nextVol = 0.85;
+                  }
                   handleUpdateLayer(idx, {
-                    volume: Math.round(clamped * 125) / 100,
+                    volume: nextVol,
                   });
                 };
 
@@ -2794,8 +2798,17 @@ export default function App() {
                         aria-valuemax={125}
                         aria-valuenow={layerVolPct}
                         onPointerDown={(e) => {
+                          if (e.detail >= 2) {
+                            handleUpdateLayer(idx, { volume: 0.85 });
+                            return;
+                          }
                           e.currentTarget.setPointerCapture(e.pointerId);
-                          updateFaderFromPointer(e);
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const clickPct =
+                            (1 - (e.clientY - rect.top) / rect.height) * 100;
+                          if (Math.abs(clickPct - faderPct) > 4.5) {
+                            updateFaderFromPointer(e);
+                          }
                         }}
                         onPointerMove={(e) => {
                           if (e.buttons === 1) updateFaderFromPointer(e);
@@ -2821,20 +2834,20 @@ export default function App() {
                         }}
                       >
                         <div className="sk-fader-ticks left" aria-hidden="true">
-                          <span />
-                          <span />
-                          <span />
-                          <span />
-                          <span />
-                          <span />
+                          <span style={{ bottom: "94%" }} />
+                          <span className="zero-tick" style={{ bottom: "68%" }} />
+                          <span style={{ bottom: "52%" }} />
+                          <span style={{ bottom: "36%" }} />
+                          <span style={{ bottom: "20%" }} />
+                          <span style={{ bottom: "4%" }} />
                         </div>
                         <div className="sk-fader-ticks right" aria-hidden="true">
-                          <span />
-                          <span />
-                          <span />
-                          <span />
-                          <span />
-                          <span />
+                          <span style={{ bottom: "94%" }} />
+                          <span className="zero-tick" style={{ bottom: "68%" }} />
+                          <span style={{ bottom: "52%" }} />
+                          <span style={{ bottom: "36%" }} />
+                          <span style={{ bottom: "20%" }} />
+                          <span style={{ bottom: "4%" }} />
                         </div>
                         <div className="sk-fader-groove" aria-hidden="true">
                           <div
@@ -2849,12 +2862,14 @@ export default function App() {
                         >
                           <span className="sk-fader-led" />
                         </div>
-                        <span
-                          className="sk-fader-db"
-                          style={{ bottom: `calc(${faderPct}% - 7px)` }}
-                        >
-                          {formatDb(layer.volume)}
-                        </span>
+                        {Math.abs(layer.volume - 0.85) >= 0.005 && (
+                          <span
+                            className="sk-fader-db"
+                            style={{ bottom: `calc(${faderPct}% - 7px)` }}
+                          >
+                            {formatDb(layer.volume)}
+                          </span>
+                        )}
                         <span className="sk-fader-inf" aria-hidden="true">
                           -∞
                         </span>

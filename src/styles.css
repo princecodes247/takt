@@ -928,35 +928,39 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 
 .sk-fader-ticks {
   position: absolute;
-  top: 10px;
-  bottom: 10px;
-  width: 14px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  top: 0;
+  bottom: 0;
+  width: 16px;
   pointer-events: none;
 }
 
 .sk-fader-ticks.left {
-  left: 24px;
-  align-items: flex-end;
+  left: 22px;
 }
 
 .sk-fader-ticks.right {
-  right: 24px;
-  align-items: flex-start;
+  right: 22px;
 }
 
 .sk-fader-ticks span {
+  position: absolute;
   display: block;
   width: 11px;
   height: 1px;
   background: rgba(255, 255, 255, 0.22);
 }
 
-.sk-fader-ticks span:nth-child(2) {
-  width: 15px;
-  background: rgba(255, 255, 255, 0.34);
+.sk-fader-ticks.left span {
+  right: 0;
+}
+
+.sk-fader-ticks.right span {
+  left: 0;
+}
+
+.sk-fader-ticks span.zero-tick {
+  width: 16px;
+  background: rgba(255, 255, 255, 0.42);
 }
 
 .sk-fader-thumb {
