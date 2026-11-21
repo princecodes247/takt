@@ -127,7 +127,7 @@ const WORSHIP_KEYS = [
 
 const OCTAVE_C_NOTES = [24, 36, 48, 60, 72, 84, 96, 108];
 
-const LAYER_COLORS = ["#f59e0b", "#22c55e", "#3b82f6", "#a855f7"];
+const LAYER_COLORS = ["#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
 
 const NOTE_NAMES = [
   "C",
@@ -286,6 +286,13 @@ interface Patch {
   name: string;
   layerSoundIds: string[];
   snapshots: PatchSnapshot[];
+}
+
+function formatDb(vol: number): string {
+  if (vol <= 0.002) return "-∞";
+  const db = 20 * Math.log10(vol / 0.85);
+  if (Math.abs(db) < 0.05) return "0 dB";
+  return `${db.toFixed(2)} dB`;
 }
 
 function makeDefaultPatches(): Patch[] {
@@ -2060,33 +2067,72 @@ export default function App() {
               {layers.map((layer, idx) => {
                 const color = LAYER_COLORS[idx % LAYER_COLORS.length];
                 const layerVolPct = Math.round(layer.volume * 100);
+                const faderPct = Math.max(0, Math.min(100, (layer.volume / 1.25) * 100));
                 const paramSet = new Set(layer.supportedParams);
+
+                const midiActive = layer.octaveShift !== 0;
+                const midiLabel =
+                  layer.octaveShift === 1
+                    ? "Octave Up"
+                    : layer.octaveShift === -1
+                      ? "Octave Down"
+                      : layer.octaveShift > 0
+                        ? `Octave +${layer.octaveShift}`
+                        : layer.octaveShift < 0
+                          ? `Octave ${layer.octaveShift}`
+                          : "Select Effect";
+
+                const hasAudio01 = paramSet.has("chorus");
+                const audio01Lit = hasAudio01 && layer.params.chorusMix > 0.02;
+
+                const hasTremolo = paramSet.has("tremolo");
+                const hasDelay = paramSet.has("delay");
+                const audio02Kind = hasTremolo
+                  ? "tremolo"
+                  : hasDelay
+                    ? "delay"
+                    : null;
+                const audio02Lit =
+                  audio02Kind === "tremolo"
+                    ? layer.params.tremoloDepth > 0.02
+                    : audio02Kind === "delay"
+                      ? layer.params.delayMix > 0.02
+                      : false;
+
+                const hasAudio03 = paramSet.has("reverb");
+                const audio03Lit = hasAudio03 && layer.params.reverbMix > 0.02;
+
+                const updateFaderFromPointer = (
+                  e: React.PointerEvent<HTMLDivElement>
+                ) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const ratio = 1 - (e.clientY - rect.top) / rect.height;
+                  const clamped = Math.max(0, Math.min(1, ratio));
+                  handleUpdateLayer(idx, {
+                    volume: Math.round(clamped * 125) / 100,
+                  });
+                };
+
                 return (
                   <div
                     key={`${idx}-${layer.soundId}`}
                     className={`layer-strip ${layer.enabled ? "" : "muted"}`}
                     style={{ "--layer-color": color } as React.CSSProperties}
                   >
-                    <div className="layer-accent-bar" />
-
                     <div className="layer-head">
                       <button
                         type="button"
                         className="layer-name-btn"
                         onClick={() => setPickerTarget(idx)}
-                        title="Click to change sound for this layer"
+                        title={`${layer.soundName} (${layer.category} · ${midiNoteLabel(layer.minNote)}–${midiNoteLabel(layer.maxNote)}) — Click to change sound`}
                       >
                         <span className="layer-name">{layer.soundName}</span>
-                        <span className="layer-cat">
-                          {layer.category} · {midiNoteLabel(layer.minNote)}–
-                          {midiNoteLabel(layer.maxNote)}
-                        </span>
                       </button>
 
                       <div className="layer-head-actions">
                         <button
                           type="button"
-                          className={`icon-btn ${editingLayerIdx === idx ? "active" : ""}`}
+                          className={`sk-tune-btn ${editingLayerIdx === idx ? "active" : ""}`}
                           onClick={() =>
                             setEditingLayerIdx((cur) =>
                               cur === idx ? null : idx
@@ -2094,12 +2140,27 @@ export default function App() {
                           }
                           title="Layer Controls (Tone, Envelope, Key Range)"
                         >
-                          ≡
+                          <svg
+                            viewBox="0 0 24 24"
+                            width="15"
+                            height="15"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          >
+                            <line x1="4" y1="6" x2="20" y2="6" />
+                            <circle cx="9" cy="6" r="2" fill="currentColor" />
+                            <line x1="4" y1="12" x2="20" y2="12" />
+                            <circle cx="15" cy="12" r="2" fill="currentColor" />
+                            <line x1="4" y1="18" x2="20" y2="18" />
+                            <circle cx="10" cy="18" r="2" fill="currentColor" />
+                          </svg>
                         </button>
                         {idx > 0 && (
                           <button
                             type="button"
-                            className="icon-btn danger"
+                            className="sk-remove-btn"
                             onClick={() => handleRemoveLayer(idx)}
                             title="Remove Layer"
                           >
@@ -2109,156 +2170,376 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Quick Sunday-Keys-style modifier slots */}
+                    {/* Sunday-Keys 1:1 Midi + Audio 01-03 split-power slots */}
                     <div className="layer-slots">
-                      <button
-                        type="button"
-                        className={`slot-btn ${layer.octaveShift !== 0 ? "lit" : ""}`}
-                        onClick={() => {
-                          const nextOct =
-                            layer.octaveShift === 0
-                              ? 1
-                              : layer.octaveShift === 1
-                                ? -1
-                                : 0;
-                          handleUpdateLayer(idx, { octaveShift: nextOct });
-                        }}
+                      <div
+                        className={`sk-slot sk-slot-midi ${midiActive ? "lit" : "empty-val"}`}
                       >
-                        <span className="slot-sub">MIDI</span>
-                        <span className="slot-val">
-                          {layer.octaveShift === 0
-                            ? "Octave 0"
-                            : layer.octaveShift > 0
-                              ? `Octave +${layer.octaveShift}`
-                              : `Octave ${layer.octaveShift}`}
-                        </span>
-                      </button>
-
-                      {paramSet.has("chorus") && (
                         <button
                           type="button"
-                          className={`slot-btn ${layer.params.chorusMix > 0.02 ? "lit" : ""}`}
+                          className="sk-slot-pwr"
+                          aria-label="Toggle Octave Shift"
+                          onClick={() =>
+                            handleUpdateLayer(idx, {
+                              octaveShift: midiActive ? 0 : 1,
+                            })
+                          }
+                        >
+                          <svg
+                            viewBox="0 0 24 24"
+                            width="14"
+                            height="14"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                          >
+                            <path d="M12 3v9" />
+                            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="sk-slot-body"
+                          onClick={() => {
+                            const nextOct =
+                              layer.octaveShift === 0
+                                ? 1
+                                : layer.octaveShift === 1
+                                  ? -1
+                                  : 0;
+                            handleUpdateLayer(idx, { octaveShift: nextOct });
+                          }}
+                        >
+                          <span className="sk-slot-sub">Midi</span>
+                          <span className="sk-slot-val-row">
+                            <span className="sk-slot-val">{midiLabel}</span>
+                            {!midiActive && (
+                              <span className="sk-slot-chevron" aria-hidden="true">
+                                ›
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div
+                        className={`sk-slot ${audio01Lit ? "lit" : ""} ${!hasAudio01 ? "disabled" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="sk-slot-pwr"
+                          disabled={!hasAudio01}
+                          aria-label="Toggle Chorus"
                           onClick={() =>
                             handleUpdateLayer(idx, {
                               paramsPatch: {
-                                chorusMix:
-                                  layer.params.chorusMix > 0.02 ? 0.0 : 0.45,
+                                chorusMix: audio01Lit ? 0.0 : 0.45,
                               },
                             })
                           }
                         >
-                          <span className="slot-sub">FX 01</span>
-                          <span className="slot-val">Chorus</span>
+                          <svg
+                            viewBox="0 0 24 24"
+                            width="14"
+                            height="14"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                          >
+                            <path d="M12 3v9" />
+                            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                          </svg>
                         </button>
-                      )}
-
-                      {paramSet.has("tremolo") && (
                         <button
                           type="button"
-                          className={`slot-btn ${layer.params.tremoloDepth > 0.02 ? "lit" : ""}`}
+                          className="sk-slot-body"
+                          disabled={!hasAudio01}
                           onClick={() =>
                             handleUpdateLayer(idx, {
                               paramsPatch: {
-                                tremoloDepth:
-                                  layer.params.tremoloDepth > 0.02 ? 0.0 : 0.45,
+                                chorusMix: audio01Lit ? 0.0 : 0.45,
                               },
                             })
                           }
                         >
-                          <span className="slot-sub">FX 02</span>
-                          <span className="slot-val">Tremolo</span>
+                          <span className="sk-slot-sub">Audio 01</span>
+                          <span className="sk-slot-val">
+                            {hasAudio01 ? "Chorus" : "Effect"}
+                          </span>
                         </button>
-                      )}
+                      </div>
 
-                      {paramSet.has("delay") && (
+                      <div
+                        className={`sk-slot ${audio02Lit ? "lit" : ""} ${!audio02Kind ? "disabled" : ""}`}
+                      >
                         <button
                           type="button"
-                          className={`slot-btn ${layer.params.delayMix > 0.02 ? "lit" : ""}`}
+                          className="sk-slot-pwr"
+                          disabled={!audio02Kind}
+                          aria-label={`Toggle ${audio02Kind === "tremolo" ? "Tremolo" : "Delay"}`}
+                          onClick={() => {
+                            if (audio02Kind === "tremolo") {
+                              handleUpdateLayer(idx, {
+                                paramsPatch: {
+                                  tremoloDepth: audio02Lit ? 0.0 : 0.45,
+                                },
+                              });
+                            } else if (audio02Kind === "delay") {
+                              handleUpdateLayer(idx, {
+                                paramsPatch: {
+                                  delayMix: audio02Lit ? 0.0 : 0.28,
+                                },
+                              });
+                            }
+                          }}
+                        >
+                          <svg
+                            viewBox="0 0 24 24"
+                            width="14"
+                            height="14"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                          >
+                            <path d="M12 3v9" />
+                            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="sk-slot-body"
+                          disabled={!audio02Kind}
+                          onClick={() => {
+                            if (audio02Kind === "tremolo") {
+                              handleUpdateLayer(idx, {
+                                paramsPatch: {
+                                  tremoloDepth: audio02Lit ? 0.0 : 0.45,
+                                },
+                              });
+                            } else if (audio02Kind === "delay") {
+                              handleUpdateLayer(idx, {
+                                paramsPatch: {
+                                  delayMix: audio02Lit ? 0.0 : 0.28,
+                                },
+                              });
+                            }
+                          }}
+                        >
+                          <span className="sk-slot-sub">Audio 02</span>
+                          <span className="sk-slot-val">
+                            {audio02Kind === "tremolo"
+                              ? "Tremolo"
+                              : audio02Kind === "delay"
+                                ? "Delay"
+                                : "Effect"}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div
+                        className={`sk-slot ${audio03Lit ? "lit" : ""} ${!hasAudio03 ? "disabled" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="sk-slot-pwr"
+                          disabled={!hasAudio03}
+                          aria-label="Toggle Reverb"
                           onClick={() =>
                             handleUpdateLayer(idx, {
                               paramsPatch: {
-                                delayMix:
-                                  layer.params.delayMix > 0.02 ? 0.0 : 0.28,
+                                reverbMix: audio03Lit ? 0.0 : 0.3,
                               },
                             })
                           }
                         >
-                          <span className="slot-sub">FX 03</span>
-                          <span className="slot-val">Delay</span>
+                          <svg
+                            viewBox="0 0 24 24"
+                            width="14"
+                            height="14"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                          >
+                            <path d="M12 3v9" />
+                            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                          </svg>
                         </button>
-                      )}
-
-                      {paramSet.has("reverb") && (
                         <button
                           type="button"
-                          className={`slot-btn ${layer.params.reverbMix > 0.02 ? "lit" : ""}`}
+                          className="sk-slot-body"
+                          disabled={!hasAudio03}
                           onClick={() =>
                             handleUpdateLayer(idx, {
                               paramsPatch: {
-                                reverbMix:
-                                  layer.params.reverbMix > 0.02 ? 0.0 : 0.3,
+                                reverbMix: audio03Lit ? 0.0 : 0.3,
                               },
                             })
                           }
                         >
-                          <span className="slot-sub">FX 04</span>
-                          <span className="slot-val">Reverb</span>
+                          <span className="sk-slot-sub">Audio 03</span>
+                          <span className="sk-slot-val">
+                            {hasAudio03 ? "Reverb" : "Effect"}
+                          </span>
                         </button>
-                      )}
+                      </div>
                     </div>
 
-                    {/* Vertical Fader + Enable/Mute Power */}
+                    {/* Sunday-Keys 1:1 Vertical Fader with ticks, glowing track, 3D cap & dB readout */}
                     <div className="layer-fader-area">
-                      <div className="v-fader-wrap tall">
-                        <input
-                          type="range"
-                          className="v-fader"
-                          style={
-                            {
-                              "--fill": `${(layerVolPct / 125) * 100}%`,
-                              "--fader-color": color,
-                            } as React.CSSProperties
-                          }
-                          aria-label={`${layer.soundName} Volume`}
-                          min={0}
-                          max={125}
-                          value={layerVolPct}
-                          onChange={(e) =>
+                      <div
+                        className="sk-fader"
+                        role="slider"
+                        tabIndex={0}
+                        aria-label={`${layer.soundName} Volume`}
+                        aria-valuemin={0}
+                        aria-valuemax={125}
+                        aria-valuenow={layerVolPct}
+                        onPointerDown={(e) => {
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          updateFaderFromPointer(e);
+                        }}
+                        onPointerMove={(e) => {
+                          if (e.buttons === 1) updateFaderFromPointer(e);
+                        }}
+                        onDoubleClick={() =>
+                          handleUpdateLayer(idx, { volume: 0.85 })
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "ArrowUp" || e.key === "ArrowRight") {
+                            e.preventDefault();
                             handleUpdateLayer(idx, {
-                              volume: Number(e.target.value) / 100,
-                            })
+                              volume: Math.min(1.25, layer.volume + 0.03),
+                            });
+                          } else if (
+                            e.key === "ArrowDown" ||
+                            e.key === "ArrowLeft"
+                          ) {
+                            e.preventDefault();
+                            handleUpdateLayer(idx, {
+                              volume: Math.max(0, layer.volume - 0.03),
+                            });
                           }
-                          onDoubleClick={() =>
-                            handleUpdateLayer(idx, { volume: 0.85 })
-                          }
-                        />
-                      </div>
-                      <div className="layer-bottom-row">
-                        <button
-                          type="button"
-                          className={`power-btn ${layer.enabled ? "on" : ""}`}
-                          onClick={() =>
-                            handleUpdateLayer(idx, { enabled: !layer.enabled })
-                          }
-                          title={layer.enabled ? "Mute layer" : "Enable layer"}
+                        }}
+                      >
+                        <div className="sk-fader-ticks left" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
+                          <span />
+                          <span />
+                          <span />
+                        </div>
+                        <div className="sk-fader-ticks right" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
+                          <span />
+                          <span />
+                          <span />
+                        </div>
+                        <div className="sk-fader-groove" aria-hidden="true">
+                          <div
+                            className="sk-fader-glow"
+                            style={{ height: `${faderPct}%` }}
+                          />
+                        </div>
+                        <div
+                          className="sk-fader-thumb"
+                          style={{ bottom: `calc(${faderPct}% - 11px)` }}
+                          aria-hidden="true"
                         >
-                          {layer.enabled ? "ON" : "MUTED"}
-                        </button>
-                        <span className="layer-vol-pct">{layerVolPct}%</span>
+                          <span className="sk-fader-led" />
+                        </div>
+                        <span
+                          className="sk-fader-db"
+                          style={{ bottom: `calc(${faderPct}% - 7px)` }}
+                        >
+                          {formatDb(layer.volume)}
+                        </span>
+                        <span className="sk-fader-inf" aria-hidden="true">
+                          -∞
+                        </span>
                       </div>
                     </div>
                   </div>
                 );
               })}
 
-              <button
-                type="button"
-                className="add-layer-slot"
-                onClick={() => setPickerTarget("add")}
-              >
-                <span className="add-plus">+</span>
-                <span>Add Sound</span>
-              </button>
+              {Array.from({
+                length: Math.max(1, 5 - layers.length),
+              }).map((_, slotOffset) => {
+                const slotIdx = layers.length + slotOffset;
+                const slotColor = LAYER_COLORS[slotIdx % LAYER_COLORS.length];
+                return (
+                  <button
+                    key={`add-slot-${slotIdx}`}
+                    type="button"
+                    className="add-layer-slot"
+                    style={{ "--slot-color": slotColor } as React.CSSProperties}
+                    onClick={() => setPickerTarget("add")}
+                  >
+                    <div className="add-ghost-strip" aria-hidden="true">
+                      <div className="add-ghost-head">
+                        <span className="add-ghost-icon">
+                          <svg
+                            viewBox="0 0 24 24"
+                            width="15"
+                            height="15"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          >
+                            <line x1="4" y1="6" x2="20" y2="6" />
+                            <circle cx="9" cy="6" r="2" fill="currentColor" />
+                            <line x1="4" y1="12" x2="20" y2="12" />
+                            <circle cx="15" cy="12" r="2" fill="currentColor" />
+                            <line x1="4" y1="18" x2="20" y2="18" />
+                            <circle cx="10" cy="18" r="2" fill="currentColor" />
+                          </svg>
+                        </span>
+                      </div>
+                      <div className="add-ghost-slots">
+                        {["Midi", "Audio 01", "Audio 02", "Audio 03"].map(
+                          (slotLabel) => (
+                            <div key={slotLabel} className="add-ghost-slot">
+                              <span className="add-ghost-pwr">
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  width="14"
+                                  height="14"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.2"
+                                  strokeLinecap="round"
+                                >
+                                  <path d="M12 3v9" />
+                                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                                </svg>
+                              </span>
+                              <div className="add-ghost-txt">
+                                <span className="add-ghost-sub">
+                                  {slotLabel}
+                                </span>
+                                <span className="add-ghost-val">Effect</span>
+                              </div>
+                            </div>
+                          )
+                        )}
+                      </div>
+                      <div className="add-ghost-fader" />
+                    </div>
+                    <div className="add-overlay">
+                      <span className="add-plus">+</span>
+                      <span>Add Sound</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Snapshots Bar inside current Patch */}
