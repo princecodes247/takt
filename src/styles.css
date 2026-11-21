@@ -615,7 +615,8 @@ input:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 6px;
+  margin: 0 -10px;
+  padding: 0 10px 6px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
@@ -636,9 +637,8 @@ input:focus-visible {
 .sidebar-new-btn {
   width: 24px;
   height: 24px;
-  background: #252936;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
+  border: none;
+  background-color: transparent;
   color: #e5e7eb;
   font-size: 0.95rem;
   font-weight: 600;
@@ -1109,7 +1109,8 @@ input[type="range"].sk-seek-bar::-webkit-slider-thumb {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding-bottom: 10px;
+  margin: 0 -9px;
+  padding: 0 9px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 36px;
 }
@@ -1482,6 +1483,8 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 
 .add-ghost-head {
   height: 36px;
+  margin: 0 -9px;
+  padding: 0 9px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   justify-content: flex-end;
@@ -3635,13 +3638,14 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
 }
 
 .patch-nav-row {
-  margin-top: auto;
+  margin: auto -10px 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding-top: 8px;
+  padding: 8px 10px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
 }
 
 .patch-nav-btn {

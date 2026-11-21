@@ -76,17 +76,6 @@ export function LeftSidebar({
   return (
     <aside className="stage-sidebar">
       <section className="sidebar-card favorites-card">
-        <div className="sidebar-card-head patches-head">
-          <button
-            type="button"
-            className="sidebar-new-btn"
-            onClick={onCreatePatch}
-            aria-label="Save current layers as a new Patch"
-            title="Save current layers as a new Patch"
-          >
-            +
-          </button>
-        </div>
         <div className="favorites-list">
           {patches.map((patch, idx) => {
             const selected = patch.id === activePatch?.id;
@@ -135,7 +124,16 @@ export function LeftSidebar({
               onLoadPatch(patches[prev], 0);
             }}
           >
-            ‹ Prev
+            Prev
+          </button>
+          <button
+            type="button"
+            className="sidebar-new-btn"
+            onClick={onCreatePatch}
+            aria-label="Save current layers as a new Patch"
+            title="Save current layers as a new Patch"
+          >
+            +
           </button>
           <button
             type="button"
@@ -147,7 +145,7 @@ export function LeftSidebar({
               onLoadPatch(patches[next], 0);
             }}
           >
-            Next ›
+            Next
           </button>
         </div>
       </section>
@@ -247,22 +245,22 @@ export function LeftSidebar({
               onPointerDownCapture={
                 midiLearnMode
                   ? (e) => {
-                      if ((e.target as HTMLElement).closest(".midi-cc-pill"))
-                        return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onArmMidiTarget("pad:volume");
-                    }
+                    if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                      return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onArmMidiTarget("pad:volume");
+                  }
                   : undefined
               }
               onClickCapture={
                 midiLearnMode
                   ? (e) => {
-                      if ((e.target as HTMLElement).closest(".midi-cc-pill"))
-                        return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }
+                    if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                      return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }
                   : undefined
               }
             >
@@ -390,22 +388,22 @@ export function LeftSidebar({
                 onPointerDownCapture={
                   midiLearnMode
                     ? (e) => {
-                        if ((e.target as HTMLElement).closest(".midi-cc-pill"))
-                          return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onArmMidiTarget("track:volume");
-                      }
+                      if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                        return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onArmMidiTarget("track:volume");
+                    }
                     : undefined
                 }
                 onClickCapture={
                   midiLearnMode
                     ? (e) => {
-                        if ((e.target as HTMLElement).closest(".midi-cc-pill"))
-                          return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }
+                      if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                        return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }
                     : undefined
                 }
               >
