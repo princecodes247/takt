@@ -3357,8 +3357,6 @@ export default function App() {
                 const pb = status?.pitchBend ?? 0;
                 const pbPct = ((pb + 8192) / 16383) * 100;
                 const pbActive = Math.abs(pb) > 128;
-                const tickCount = 13;
-                const midIdx = Math.floor(tickCount / 2);
                 const updatePb = (e: React.PointerEvent<HTMLDivElement>) => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const ratio = 1 - (e.clientY - rect.top) / rect.height;
@@ -3375,28 +3373,9 @@ export default function App() {
                   );
                   void invoke("set_pitch_bend", { value: 0 });
                 };
-                const renderPbTicks = (side: "left" | "right") => (
-                  <div className={`wheel-ticks ${side}`} aria-hidden="true">
-                    {Array.from({ length: tickCount }).map((_, i) => {
-                      const tickPct = ((tickCount - 1 - i) / (tickCount - 1)) * 100;
-                      const isCenter = i === midIdx;
-                      const lit =
-                        pbActive &&
-                        ((pb > 0 && tickPct > 50 && tickPct <= pbPct + 3) ||
-                          (pb < 0 && tickPct < 50 && tickPct >= pbPct - 3));
-                      return (
-                        <span
-                          key={i}
-                          className={`wheel-tick ${isCenter ? "center" : ""} ${lit ? "lit" : ""}`}
-                        />
-                      );
-                    })}
-                  </div>
-                );
                 return (
                   <div className="midi-wheel-col">
-                    <div className="midi-wheel-unit">
-                      {renderPbTicks("left")}
+                    <div className="midi-wheel-unit pb-only">
                       <div
                         className={`midi-wheel-well ${pbActive ? "active" : ""}`}
                         role="slider"
@@ -3424,9 +3403,8 @@ export default function App() {
                           />
                         </div>
                       </div>
-                      {renderPbTicks("right")}
                     </div>
-                    <span className="midi-wheel-label">PB</span>
+                    {/* <span className="midi-wheel-label">PB</span> */}
                   </div>
                 );
               })()}
@@ -3471,7 +3449,6 @@ export default function App() {
                 return (
                   <div className="midi-wheel-col">
                     <div className="midi-wheel-unit">
-                      {renderMwTicks("left")}
                       <div
                         className={`midi-wheel-well ${mwActive ? "active" : ""}`}
                         role="slider"
@@ -3504,7 +3481,7 @@ export default function App() {
                       </div>
                       {renderMwTicks("right")}
                     </div>
-                    <span className="midi-wheel-label">MOD</span>
+                    {/* <span className="midi-wheel-label">MOD</span> */}
                   </div>
                 );
               })()}
@@ -3514,121 +3491,121 @@ export default function App() {
               {/* Interactive Colored Layer Key-Range Bars */}
               <div
                 className="zone-bars"
-            role="button"
-            tabIndex={0}
-            title="Click to edit layer key ranges"
-            onClick={() => setZonesView(true)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") setZonesView(true);
-            }}
-          >
-            {layers.map((layer, idx) => {
-              const color = LAYER_COLORS[idx % LAYER_COLORS.length];
-              const leftPct = ((layer.minNote - 21) / 87) * 100;
-              const widthPct = Math.max(
-                1.5,
-                ((layer.maxNote - layer.minNote) / 87) * 100
-              );
-              return (
-                <div
-                  key={`zone-${idx}`}
-                  className="zone-track"
-                  title={`${layer.soundName} · ${midiNoteLabel(layer.minNote)}–${midiNoteLabel(layer.maxNote)}`}
-                >
-                  <div
-                    className={`zone-fill ${layer.enabled ? "" : "muted"}`}
-                    style={{
-                      left: `${leftPct}%`,
-                      width: `${widthPct}%`,
-                      background: color,
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
+                role="button"
+                tabIndex={0}
+                title="Click to edit layer key ranges"
+                onClick={() => setZonesView(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") setZonesView(true);
+                }}
+              >
+                {layers.map((layer, idx) => {
+                  const color = LAYER_COLORS[idx % LAYER_COLORS.length];
+                  const leftPct = ((layer.minNote - 21) / 87) * 100;
+                  const widthPct = Math.max(
+                    1.5,
+                    ((layer.maxNote - layer.minNote) / 87) * 100
+                  );
+                  return (
+                    <div
+                      key={`zone-${idx}`}
+                      className="zone-track"
+                      title={`${layer.soundName} · ${midiNoteLabel(layer.minNote)}–${midiNoteLabel(layer.maxNote)}`}
+                    >
+                      <div
+                        className={`zone-fill ${layer.enabled ? "" : "muted"}`}
+                        style={{
+                          left: `${leftPct}%`,
+                          width: `${widthPct}%`,
+                          background: color,
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
 
-          <div className="mini-piano" aria-label="88-Key Piano">
-            <div className="piano-felt-strip" aria-hidden="true" />
-            <div className="white-keys">
-              {WHITE_KEYS.map((key) => {
-                const midiActive = activeMidiNotes.has(key.note);
-                const localActive =
-                  activeKeyboardNotes.has(key.note) ||
-                  activeMouseNote === key.note;
-                const pressed = midiActive || localActive;
-                const qwertyLabel = keyboardEnabled
-                  ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
-                  : undefined;
-                const isMiddleC = key.note === 60;
-                return (
-                  <button
-                    key={key.note}
-                    type="button"
-                    tabIndex={-1}
-                    className={`piano-key white ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""} ${isMiddleC ? "middle-c" : ""}`}
-                    onPointerDown={(e) => {
-                      e.preventDefault();
-                      mousePressedRef.current = true;
-                      glissandoTo(key.note);
-                    }}
-                    onPointerEnter={(e) => {
-                      if (!mousePressedRef.current || (e.buttons & 1) === 0)
-                        return;
-                      glissandoTo(key.note);
-                    }}
-                  >
-                    {qwertyLabel && (
-                      <span className="key-cap">{qwertyLabel}</span>
-                    )}
-                    {isMiddleC && <span className="middle-c-dot" aria-hidden="true" />}
-                    {key.cLabel && !qwertyLabel && (
-                      <span className="octave-mark">{key.cLabel}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="black-keys">
-              {BLACK_KEYS.map((key) => {
-                const midiActive = activeMidiNotes.has(key.note);
-                const localActive =
-                  activeKeyboardNotes.has(key.note) ||
-                  activeMouseNote === key.note;
-                const pressed = midiActive || localActive;
-                const qwertyLabel = keyboardEnabled
-                  ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
-                  : undefined;
-                const leftPct =
-                  ((key.whiteIndex + 0.65) / WHITE_KEYS.length) * 100;
-                return (
-                  <button
-                    key={key.note}
-                    type="button"
-                    tabIndex={-1}
-                    style={{ left: `${leftPct}%` }}
-                    className={`piano-key black ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""}`}
-                    onPointerDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      mousePressedRef.current = true;
-                      glissandoTo(key.note);
-                    }}
-                    onPointerEnter={(e) => {
-                      if (!mousePressedRef.current || (e.buttons & 1) === 0)
-                        return;
-                      e.stopPropagation();
-                      glissandoTo(key.note);
-                    }}
-                  >
-                    {qwertyLabel && (
-                      <span className="key-cap">{qwertyLabel}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+              <div className="mini-piano" aria-label="88-Key Piano">
+                <div className="piano-felt-strip" aria-hidden="true" />
+                <div className="white-keys">
+                  {WHITE_KEYS.map((key) => {
+                    const midiActive = activeMidiNotes.has(key.note);
+                    const localActive =
+                      activeKeyboardNotes.has(key.note) ||
+                      activeMouseNote === key.note;
+                    const pressed = midiActive || localActive;
+                    const qwertyLabel = keyboardEnabled
+                      ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
+                      : undefined;
+                    const isMiddleC = key.note === 60;
+                    return (
+                      <button
+                        key={key.note}
+                        type="button"
+                        tabIndex={-1}
+                        className={`piano-key white ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""} ${isMiddleC ? "middle-c" : ""}`}
+                        onPointerDown={(e) => {
+                          e.preventDefault();
+                          mousePressedRef.current = true;
+                          glissandoTo(key.note);
+                        }}
+                        onPointerEnter={(e) => {
+                          if (!mousePressedRef.current || (e.buttons & 1) === 0)
+                            return;
+                          glissandoTo(key.note);
+                        }}
+                      >
+                        {qwertyLabel && (
+                          <span className="key-cap">{qwertyLabel}</span>
+                        )}
+                        {isMiddleC && <span className="middle-c-dot" aria-hidden="true" />}
+                        {key.cLabel && !qwertyLabel && (
+                          <span className="octave-mark">{key.cLabel}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="black-keys">
+                  {BLACK_KEYS.map((key) => {
+                    const midiActive = activeMidiNotes.has(key.note);
+                    const localActive =
+                      activeKeyboardNotes.has(key.note) ||
+                      activeMouseNote === key.note;
+                    const pressed = midiActive || localActive;
+                    const qwertyLabel = keyboardEnabled
+                      ? SEMITONE_TO_LABEL.get(key.note - (octave + 1) * 12)
+                      : undefined;
+                    const leftPct =
+                      ((key.whiteIndex + 0.65) / WHITE_KEYS.length) * 100;
+                    return (
+                      <button
+                        key={key.note}
+                        type="button"
+                        tabIndex={-1}
+                        style={{ left: `${leftPct}%` }}
+                        className={`piano-key black ${pressed ? "pressed" : ""} ${midiActive ? "midi-lit" : ""} ${qwertyLabel ? "mapped" : ""}`}
+                        onPointerDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          mousePressedRef.current = true;
+                          glissandoTo(key.note);
+                        }}
+                        onPointerEnter={(e) => {
+                          if (!mousePressedRef.current || (e.buttons & 1) === 0)
+                            return;
+                          e.stopPropagation();
+                          glissandoTo(key.note);
+                        }}
+                      >
+                        {qwertyLabel && (
+                          <span className="key-cap">{qwertyLabel}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </footer>

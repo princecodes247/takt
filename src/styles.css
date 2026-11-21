@@ -1575,7 +1575,7 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 
 .piano-deck-row {
   display: grid;
-  grid-template-columns: 82px 1fr;
+  grid-template-columns: 68px 1fr;
   gap: 8px;
   align-items: stretch;
 }
@@ -1589,8 +1589,8 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 
 .wheels-bay {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
+  grid-template-columns: 26px 1fr;
+  gap: 6px;
   padding: 1px 0;
 }
 
@@ -1605,9 +1605,13 @@ input[type="range"].v-fader::-webkit-slider-thumb {
   flex: 1 1 auto;
   width: 100%;
   display: grid;
-  grid-template-columns: 6px 1fr 6px;
+  grid-template-columns: 1fr 6px;
   gap: 2px;
   align-items: stretch;
+}
+
+.midi-wheel-unit.pb-only {
+  grid-template-columns: 1fr;
 }
 
 .wheel-ticks {
