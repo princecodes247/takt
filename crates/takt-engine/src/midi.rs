@@ -31,6 +31,11 @@ pub enum MidiEvent {
         channel: u8,
         program: u8,
     },
+    ControlChange {
+        channel: u8,
+        cc: u8,
+        value: u8,
+    },
     AllNotesOff,
 }
 
@@ -84,7 +89,7 @@ pub fn parse_midi_message(bytes: &[u8]) -> Option<MidiEvent> {
                     pressed: value >= 64,
                 }),
                 120 | 123 => Some(MidiEvent::AllNotesOff),
-                _ => None,
+                _ => Some(MidiEvent::ControlChange { channel, cc, value }),
             }
         }
         0xE0 => {

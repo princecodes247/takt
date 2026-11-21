@@ -216,3 +216,28 @@ export const LAYER_COLORS = [
 ];
 export const DEFAULT_BUFFERS = [64, 128, 256, 512, 1024];
 
+export interface MidiCcDto {
+  channel: number;
+  cc: number;
+  value: number;
+}
+
+export type MidiTargetKind =
+  | "master:volume"
+  | "pad:power"
+  | "pad:volume"
+  | "track:play"
+  | "track:volume"
+  | `layer:${number}:volume`
+  | `layer:${number}:chorus`
+  | `layer:${number}:audio02`
+  | `layer:${number}:reverb`;
+
+export interface MidiMapping {
+  target: MidiTargetKind;
+  channel: number;
+  cc: number;
+}
+
+export const MIDI_MAPPINGS_STORAGE_KEY = "takt_midi_mappings_v1";
+

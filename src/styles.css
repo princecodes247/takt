@@ -1080,8 +1080,8 @@ input[type="range"].sk-seek-bar::-webkit-slider-thumb {
 }
 
 .layer-strip {
-  flex: 1 0 215px;
-  max-width: 280px;
+  flex: 1 0 190px;
+  max-width: 245px;
   background:
     radial-gradient(
       ellipse 90% 48% at 50% 96%,
@@ -1091,7 +1091,7 @@ input[type="range"].sk-seek-bar::-webkit-slider-thumb {
     linear-gradient(180deg, #1b1e27 0%, #14171f 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
-  padding: 10px;
+  padding: 9px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1452,12 +1452,12 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 }
 
 .add-layer-slot {
-  flex: 1 0 195px;
-  max-width: 260px;
+  flex: 1 0 180px;
+  max-width: 230px;
   background: rgba(20, 23, 31, 0.55);
   border: 1px dashed rgba(255, 255, 255, 0.18);
   border-radius: 10px;
-  padding: 10px;
+  padding: 9px;
   color: #e5e7eb;
   position: relative;
   display: flex;
@@ -3784,4 +3784,166 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
 
 .snap-save-btn {
   color: #c7d9ff;
+}
+
+/* MIDI Learn */
+.btn-midi-learn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 7px;
+  background: #252936;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  font-family: var(--font-display);
+  font-size: 0.76rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.btn-midi-learn:hover {
+  border-color: rgba(137, 168, 240, 0.65);
+  background: #2a2f3e;
+  color: #ffffff;
+}
+
+.btn-midi-learn.active {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.75);
+  color: #fbbf24;
+}
+
+.midi-learn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6b7280;
+}
+
+.btn-midi-learn.active .midi-learn-dot,
+.midi-learn-banner .midi-learn-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+}
+
+.midi-learn-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 16px 0;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.38);
+  color: #fde68a;
+  font-size: 0.78rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.midi-learn-banner-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-learn-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-learn-last-cc {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #fde68a;
+  background: rgba(17, 24, 39, 0.55);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.midi-learn-banner-btn {
+  background: rgba(17, 24, 39, 0.65);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 6px;
+  color: #fde68a;
+  font-size: 0.74rem;
+  font-weight: 650;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.midi-learn-banner-btn:hover {
+  background: rgba(245, 158, 11, 0.24);
+  color: #ffffff;
+}
+
+.midi-learn-banner-btn.done {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #111827;
+}
+
+.midi-learn-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.midi-learnable {
+  position: relative;
+  outline: 1px dashed rgba(245, 158, 11, 0.55);
+  outline-offset: 2px;
+  border-radius: 7px;
+  cursor: crosshair !important;
+}
+
+.midi-learnable:hover {
+  outline-color: #fbbf24;
+  background-color: rgba(245, 158, 11, 0.08);
+}
+
+.midi-armed {
+  outline: 2px solid #f59e0b !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.45);
+  animation: pad-pulse 1s ease-in-out infinite;
+}
+
+.midi-cc-pill {
+  background: #f59e0b;
+  border: none;
+  border-radius: 999px;
+  color: #111827;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 750;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+  z-index: 4;
+}
+
+.midi-cc-pill.floating {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.midi-cc-pill.slot {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  white-space: nowrap;
+}
+
+.midi-cc-pill.inline {
+  margin-left: 6px;
 }

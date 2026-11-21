@@ -1,5 +1,7 @@
 import { useRef } from "react";
 import {
+  MidiMapping,
+  MidiTargetKind,
   Patch,
   StatusDto,
   WORSHIP_KEYS,
@@ -32,6 +34,11 @@ export function LeftSidebar({
   onTrackLoopToggle,
   onTrackSeek,
   onTrackVolumeChange,
+  midiLearnMode,
+  armedTarget,
+  midiMappings,
+  onArmMidiTarget,
+  onClearMidiMapping,
 }: {
   patches: Patch[];
   activePatch: Patch | undefined;
@@ -56,8 +63,15 @@ export function LeftSidebar({
   onTrackLoopToggle: () => void;
   onTrackSeek: (ms: number) => void;
   onTrackVolumeChange: (pct: number) => void;
+  midiLearnMode: boolean;
+  armedTarget: MidiTargetKind | null;
+  midiMappings: MidiMapping[];
+  onArmMidiTarget: (target: MidiTargetKind) => void;
+  onClearMidiMapping: (target: MidiTargetKind) => void;
 }) {
   const trackInputRef = useRef<HTMLInputElement | null>(null);
+  const getMapping = (target: MidiTargetKind) =>
+    midiMappings.find((m) => m.target === target);
 
   return (
     <aside className="stage-sidebar">
@@ -179,9 +193,19 @@ export function LeftSidebar({
                       ? "Turn Worship Pad Off"
                       : "Turn Worship Pad On"
                   }
-                  title={status?.worshipPadEnabled ? "Pad ON" : "Pad OFF"}
-                  className={`pad-split-pwr ${status?.worshipPadEnabled ? "on" : ""}`}
-                  onClick={onWorshipPadToggle}
+                  title={
+                    midiLearnMode
+                      ? "Click to MIDI-learn Pad Power"
+                      : status?.worshipPadEnabled
+                        ? "Pad ON"
+                        : "Pad OFF"
+                  }
+                  className={`pad-split-pwr ${status?.worshipPadEnabled ? "on" : ""} ${midiLearnMode ? "midi-learnable" : ""} ${midiLearnMode && armedTarget === "pad:power" ? "midi-armed" : ""}`}
+                  onClick={
+                    midiLearnMode
+                      ? () => onArmMidiTarget("pad:power")
+                      : onWorshipPadToggle
+                  }
                 >
                   <PowerSvg />
                 </button>
@@ -218,12 +242,50 @@ export function LeftSidebar({
               </div>
             </div>
 
-            <CompactFader
-              ariaLabel="Worship Pad Volume"
-              pct={padVolPct}
-              resetPct={55}
-              onChangePct={onWorshipPadVolume}
-            />
+            <div
+              className={`midi-learn-wrap ${midiLearnMode ? "midi-learnable" : ""} ${midiLearnMode && armedTarget === "pad:volume" ? "midi-armed" : ""}`}
+              onPointerDownCapture={
+                midiLearnMode
+                  ? (e) => {
+                      if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                        return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onArmMidiTarget("pad:volume");
+                    }
+                  : undefined
+              }
+              onClickCapture={
+                midiLearnMode
+                  ? (e) => {
+                      if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                        return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }
+                  : undefined
+              }
+            >
+              <CompactFader
+                ariaLabel="Worship Pad Volume"
+                pct={padVolPct}
+                resetPct={55}
+                onChangePct={onWorshipPadVolume}
+              />
+              {midiLearnMode && getMapping("pad:volume") && (
+                <button
+                  type="button"
+                  className="midi-cc-pill floating"
+                  title="Click to unbind MIDI CC"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClearMidiMapping("pad:volume");
+                  }}
+                >
+                  CC{getMapping("pad:volume")!.cc} ×
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="track-module">
@@ -274,11 +336,26 @@ export function LeftSidebar({
                 <div className="track-transport-row">
                   <button
                     type="button"
-                    className={`track-btn play ${status?.backingTrackPlaying ? "active" : ""}`}
-                    onClick={onTrackPlayToggle}
-                    disabled={!status?.backingTrackName}
+                    className={`track-btn play ${status?.backingTrackPlaying ? "active" : ""} ${midiLearnMode ? "midi-learnable" : ""} ${midiLearnMode && armedTarget === "track:play" ? "midi-armed" : ""}`}
+                    onClick={
+                      midiLearnMode
+                        ? () => onArmMidiTarget("track:play")
+                        : onTrackPlayToggle
+                    }
+                    disabled={!midiLearnMode && !status?.backingTrackName}
                   >
                     {status?.backingTrackPlaying ? "⏸ Pause" : "▶ Play"}
+                    {midiLearnMode && getMapping("track:play") && (
+                      <span
+                        className="midi-cc-pill inline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClearMidiMapping("track:play");
+                        }}
+                      >
+                        CC{getMapping("track:play")!.cc} ×
+                      </span>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -308,12 +385,50 @@ export function LeftSidebar({
                 </div>
               </div>
 
-              <CompactFader
-                ariaLabel="Backing Track Volume"
-                pct={trackVolPct}
-                resetPct={75}
-                onChangePct={onTrackVolumeChange}
-              />
+              <div
+                className={`midi-learn-wrap ${midiLearnMode ? "midi-learnable" : ""} ${midiLearnMode && armedTarget === "track:volume" ? "midi-armed" : ""}`}
+                onPointerDownCapture={
+                  midiLearnMode
+                    ? (e) => {
+                        if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                          return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onArmMidiTarget("track:volume");
+                      }
+                    : undefined
+                }
+                onClickCapture={
+                  midiLearnMode
+                    ? (e) => {
+                        if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                          return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    : undefined
+                }
+              >
+                <CompactFader
+                  ariaLabel="Backing Track Volume"
+                  pct={trackVolPct}
+                  resetPct={75}
+                  onChangePct={onTrackVolumeChange}
+                />
+                {midiLearnMode && getMapping("track:volume") && (
+                  <button
+                    type="button"
+                    className="midi-cc-pill floating"
+                    title="Click to unbind MIDI CC"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClearMidiMapping("track:volume");
+                    }}
+                  >
+                    CC{getMapping("track:volume")!.cc} ×
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

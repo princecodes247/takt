@@ -137,6 +137,7 @@ pub struct TaktEngine {
     pitch_bend: Arc<AtomicI16>,
     mod_wheel: Arc<AtomicU8>,
     last_program_change: Arc<AtomicI8>,
+    cc_pending: Arc<[AtomicI16; 128]>,
     // Backing track state
     current_track: Option<Arc<SampleData>>,
     current_track_name: Option<String>,
@@ -198,6 +199,7 @@ impl TaktEngine {
             pitch_bend: Arc::new(AtomicI16::new(0)),
             mod_wheel: Arc::new(AtomicU8::new(0)),
             last_program_change: Arc::new(AtomicI8::new(-1)),
+            cc_pending: Arc::new(std::array::from_fn(|_| AtomicI16::new(-1))),
             current_track: Some(Arc::new(synthesize_demo_backing_track())),
             current_track_name: Some("Demo Groove · 120 BPM (C)".to_string()),
             track_tx,
@@ -510,6 +512,20 @@ impl TaktEngine {
         }
     }
 
+    /// Drains any pending MIDI Control Change events `(channel, cc, value)`.
+    pub fn take_control_changes(&self) -> Vec<(u8, u8, u8)> {
+        let mut out = Vec::new();
+        for (cc, slot) in self.cc_pending.iter().enumerate() {
+            let packed = slot.swap(-1, Ordering::AcqRel);
+            if packed >= 0 {
+                let channel = ((packed >> 8) & 0x0F) as u8;
+                let value = (packed & 0x7F) as u8;
+                out.push((channel, cc as u8, value));
+            }
+        }
+        out
+    }
+
     pub fn status(&mut self) -> EngineStatus {
         self.drain_reclaimed_banks();
         let (audio_device, sample_rate, buffer_size, estimated_latency_ms) =
@@ -672,6 +688,7 @@ impl TaktEngine {
         let pitch_bend_atomic = Arc::clone(&self.pitch_bend);
         let mod_wheel_atomic = Arc::clone(&self.mod_wheel);
         let program_change_atomic = Arc::clone(&self.last_program_change);
+        let cc_pending_atomic = Arc::clone(&self.cc_pending);
         midi_notes_atomic[0].store(0, Ordering::Relaxed);
         midi_notes_atomic[1].store(0, Ordering::Relaxed);
         sustain_atomic.store(false, Ordering::Relaxed);
@@ -760,14 +777,19 @@ impl TaktEngine {
             // 2. Drain control events and MIDI events.
             while let Ok(ev) = ctrl_rx.pop() {
                 match ev {
-                    MidiEvent::SustainPedal { pressed, .. } => {
+                    MidiEvent::SustainPedal { channel, pressed } => {
                         sustain_atomic.store(pressed, Ordering::Relaxed);
+                        let val = if pressed { 127 } else { 0 };
+                        let packed = (((channel & 0x0F) as i16) << 8) | val;
+                        cc_pending_atomic[64].store(packed, Ordering::Release);
                     }
                     MidiEvent::PitchBend { value, .. } => {
                         pitch_bend_atomic.store(value, Ordering::Relaxed);
                     }
-                    MidiEvent::ModWheel { value, .. } => {
+                    MidiEvent::ModWheel { channel, value } => {
                         mod_wheel_atomic.store(value, Ordering::Relaxed);
+                        let packed = (((channel & 0x0F) as i16) << 8) | ((value & 0x7F) as i16);
+                        cc_pending_atomic[1].store(packed, Ordering::Release);
                     }
                     MidiEvent::AllNotesOff => {
                         midi_notes_atomic[0].store(0, Ordering::Relaxed);
@@ -793,14 +815,19 @@ impl TaktEngine {
                         midi_notes_atomic[(n >> 6) as usize]
                             .fetch_and(!(1u64 << (n & 63)), Ordering::Relaxed);
                     }
-                    MidiEvent::SustainPedal { pressed, .. } => {
+                    MidiEvent::SustainPedal { channel, pressed } => {
                         sustain_atomic.store(pressed, Ordering::Relaxed);
+                        let val = if pressed { 127 } else { 0 };
+                        let packed = (((channel & 0x0F) as i16) << 8) | val;
+                        cc_pending_atomic[64].store(packed, Ordering::Release);
                     }
                     MidiEvent::PitchBend { value, .. } => {
                         pitch_bend_atomic.store(value, Ordering::Relaxed);
                     }
-                    MidiEvent::ModWheel { value, .. } => {
+                    MidiEvent::ModWheel { channel, value } => {
                         mod_wheel_atomic.store(value, Ordering::Relaxed);
+                        let packed = (((channel & 0x0F) as i16) << 8) | ((value & 0x7F) as i16);
+                        cc_pending_atomic[1].store(packed, Ordering::Release);
                     }
                     MidiEvent::AllNotesOff => {
                         midi_notes_atomic[0].store(0, Ordering::Relaxed);
@@ -811,7 +838,10 @@ impl TaktEngine {
                     MidiEvent::ProgramChange { program, .. } => {
                         program_change_atomic.store((program & 127) as i8, Ordering::Release);
                     }
-                    _ => {}
+                    MidiEvent::ControlChange { channel, cc, value } => {
+                        let packed = (((channel & 0x0F) as i16) << 8) | ((value & 0x7F) as i16);
+                        cc_pending_atomic[(cc & 127) as usize].store(packed, Ordering::Release);
+                    }
                 }
                 for layer in &mut audio_layers {
                     route_event_to_layer(layer, ev, sample_rate);

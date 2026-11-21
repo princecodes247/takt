@@ -1,6 +1,8 @@
 import {
   LAYER_COLORS,
   LayerDto,
+  MidiMapping,
+  MidiTargetKind,
   Patch,
   SoundParamsDto,
 } from "../types";
@@ -20,6 +22,11 @@ export function LayerStrips({
   onDeleteSnapshot,
   onAddSnapshot,
   onSaveCurrentSnapshot,
+  midiLearnMode,
+  armedTarget,
+  midiMappings,
+  onArmMidiTarget,
+  onClearMidiMapping,
 }: {
   layers: LayerDto[];
   editingLayerIdx: number | null;
@@ -36,7 +43,14 @@ export function LayerStrips({
   onDeleteSnapshot: (idx: number) => void;
   onAddSnapshot: () => void;
   onSaveCurrentSnapshot: () => void;
+  midiLearnMode: boolean;
+  armedTarget: MidiTargetKind | null;
+  midiMappings: MidiMapping[];
+  onArmMidiTarget: (target: MidiTargetKind) => void;
+  onClearMidiMapping: (target: MidiTargetKind) => void;
 }) {
+  const getMapping = (target: MidiTargetKind) =>
+    midiMappings.find((m) => m.target === target);
   return (
     <section className="layers-stage" aria-label="Sound Layers">
       <div className="layers-row">
@@ -172,7 +186,18 @@ export function LayerStrips({
                 </div>
 
                 <div
-                  className={`sk-slot ${audio01Lit ? "lit" : ""} ${!hasAudio01 ? "disabled" : ""}`}
+                  className={`sk-slot ${audio01Lit ? "lit" : ""} ${!hasAudio01 ? "disabled" : ""} ${midiLearnMode && hasAudio01 ? "midi-learnable" : ""} ${midiLearnMode && armedTarget === `layer:${idx}:chorus` ? "midi-armed" : ""}`}
+                  onClickCapture={
+                    midiLearnMode && hasAudio01
+                      ? (e) => {
+                          if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                            return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onArmMidiTarget(`layer:${idx}:chorus`);
+                        }
+                      : undefined
+                  }
                 >
                   <button
                     type="button"
@@ -202,10 +227,34 @@ export function LayerStrips({
                       {hasAudio01 ? "Chorus" : "Effect"}
                     </span>
                   </button>
+                  {midiLearnMode && getMapping(`layer:${idx}:chorus`) && (
+                    <button
+                      type="button"
+                      className="midi-cc-pill slot"
+                      title="Click to unbind MIDI CC"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClearMidiMapping(`layer:${idx}:chorus`);
+                      }}
+                    >
+                      CC{getMapping(`layer:${idx}:chorus`)!.cc} ×
+                    </button>
+                  )}
                 </div>
 
                 <div
-                  className={`sk-slot ${audio02Lit ? "lit" : ""} ${!audio02Kind ? "disabled" : ""}`}
+                  className={`sk-slot ${audio02Lit ? "lit" : ""} ${!audio02Kind ? "disabled" : ""} ${midiLearnMode && audio02Kind ? "midi-learnable" : ""} ${midiLearnMode && armedTarget === `layer:${idx}:audio02` ? "midi-armed" : ""}`}
+                  onClickCapture={
+                    midiLearnMode && audio02Kind
+                      ? (e) => {
+                          if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                            return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onArmMidiTarget(`layer:${idx}:audio02`);
+                        }
+                      : undefined
+                  }
                 >
                   <button
                     type="button"
@@ -255,10 +304,34 @@ export function LayerStrips({
                           : "Effect"}
                     </span>
                   </button>
+                  {midiLearnMode && getMapping(`layer:${idx}:audio02`) && (
+                    <button
+                      type="button"
+                      className="midi-cc-pill slot"
+                      title="Click to unbind MIDI CC"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClearMidiMapping(`layer:${idx}:audio02`);
+                      }}
+                    >
+                      CC{getMapping(`layer:${idx}:audio02`)!.cc} ×
+                    </button>
+                  )}
                 </div>
 
                 <div
-                  className={`sk-slot ${audio03Lit ? "lit" : ""} ${!hasAudio03 ? "disabled" : ""}`}
+                  className={`sk-slot ${audio03Lit ? "lit" : ""} ${!hasAudio03 ? "disabled" : ""} ${midiLearnMode && hasAudio03 ? "midi-learnable" : ""} ${midiLearnMode && armedTarget === `layer:${idx}:reverb` ? "midi-armed" : ""}`}
+                  onClickCapture={
+                    midiLearnMode && hasAudio03
+                      ? (e) => {
+                          if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                            return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onArmMidiTarget(`layer:${idx}:reverb`);
+                        }
+                      : undefined
+                  }
                 >
                   <button
                     type="button"
@@ -288,10 +361,59 @@ export function LayerStrips({
                       {hasAudio03 ? "Reverb" : "Effect"}
                     </span>
                   </button>
+                  {midiLearnMode && getMapping(`layer:${idx}:reverb`) && (
+                    <button
+                      type="button"
+                      className="midi-cc-pill slot"
+                      title="Click to unbind MIDI CC"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClearMidiMapping(`layer:${idx}:reverb`);
+                      }}
+                    >
+                      CC{getMapping(`layer:${idx}:reverb`)!.cc} ×
+                    </button>
+                  )}
                 </div>
               </div>
 
-              <div className="layer-fader-area">
+              <div
+                className={`layer-fader-area ${midiLearnMode ? "midi-learnable" : ""} ${midiLearnMode && armedTarget === `layer:${idx}:volume` ? "midi-armed" : ""}`}
+                onPointerDownCapture={
+                  midiLearnMode
+                    ? (e) => {
+                        if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                          return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onArmMidiTarget(`layer:${idx}:volume`);
+                      }
+                    : undefined
+                }
+                onClickCapture={
+                  midiLearnMode
+                    ? (e) => {
+                        if ((e.target as HTMLElement).closest(".midi-cc-pill"))
+                          return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    : undefined
+                }
+              >
+                {midiLearnMode && getMapping(`layer:${idx}:volume`) && (
+                  <button
+                    type="button"
+                    className="midi-cc-pill floating"
+                    title="Click to unbind MIDI CC"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClearMidiMapping(`layer:${idx}:volume`);
+                    }}
+                  >
+                    CC{getMapping(`layer:${idx}:volume`)!.cc} ×
+                  </button>
+                )}
                 <div
                   className="sk-fader"
                   role="slider"

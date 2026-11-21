@@ -1,21 +1,34 @@
-import { StatusDto } from "../types";
+import { MidiMapping, MidiTargetKind, StatusDto } from "../types";
 import { RotaryKnob } from "./ui";
 
 export function HeaderBar({
   status,
   volumePct,
   setupOpen,
+  midiLearnMode,
+  armedTarget,
+  masterMapping,
   onPanic,
   onVolumeChange,
   onToggleSetup,
+  onToggleMidiLearn,
+  onArmMidiTarget,
+  onClearMidiMapping,
 }: {
   status: StatusDto | null;
   volumePct: number;
   setupOpen: boolean;
+  midiLearnMode: boolean;
+  armedTarget: MidiTargetKind | null;
+  masterMapping?: MidiMapping;
   onPanic: () => void;
   onVolumeChange: (pct: number) => void;
   onToggleSetup: () => void;
+  onToggleMidiLearn: () => void;
+  onArmMidiTarget: (target: MidiTargetKind) => void;
+  onClearMidiMapping: (target: MidiTargetKind) => void;
 }) {
+  const masterArmed = midiLearnMode && armedTarget === "master:volume";
   return (
     <header className="rack-header">
       <div className="brand">
@@ -61,8 +74,31 @@ export function HeaderBar({
         </button>
 
         <div
-          className="header-master"
-          title="Master Volume · Double-click to reset (80%)"
+          className={`header-master ${midiLearnMode ? "midi-learnable" : ""} ${masterArmed ? "midi-armed" : ""}`}
+          title={
+            midiLearnMode
+              ? "Click to MIDI-learn Master Volume"
+              : "Master Volume · Double-click to reset (80%)"
+          }
+          onPointerDownCapture={
+            midiLearnMode
+              ? (e) => {
+                  if ((e.target as HTMLElement).closest(".midi-cc-pill")) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onArmMidiTarget("master:volume");
+                }
+              : undefined
+          }
+          onClickCapture={
+            midiLearnMode
+              ? (e) => {
+                  if ((e.target as HTMLElement).closest(".midi-cc-pill")) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              : undefined
+          }
         >
           <span className="master-label">Master</span>
           <RotaryKnob
@@ -79,7 +115,31 @@ export function HeaderBar({
             onReset={() => onVolumeChange(80)}
           />
           <span className="master-pct">{volumePct}%</span>
+          {midiLearnMode && masterMapping && (
+            <button
+              type="button"
+              className="midi-cc-pill"
+              title="Click to unbind MIDI CC"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearMidiMapping("master:volume");
+              }}
+            >
+              CC{masterMapping.cc} ×
+            </button>
+          )}
         </div>
+
+        <button
+          type="button"
+          className={`btn-midi-learn ${midiLearnMode ? "active" : ""}`}
+          onClick={onToggleMidiLearn}
+          aria-pressed={midiLearnMode}
+          title="MIDI Learn — bind hardware knobs, faders, and buttons"
+        >
+          <span className="midi-learn-dot" aria-hidden="true" />
+          <span>{midiLearnMode ? "Learning" : "MIDI Learn"}</span>
+        </button>
 
         <button
           type="button"

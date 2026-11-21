@@ -298,6 +298,14 @@ struct TelemetryDto {
     backing_track_duration_ms: u32,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MidiCcDto {
+    channel: u8,
+    cc: u8,
+    value: u8,
+}
+
 fn to_status_dto(engine: &mut TaktEngine) -> StatusDto {
     let st = engine.status();
     StatusDto {
@@ -879,6 +887,17 @@ pub fn run() {
 
                     if let Some(program) = engine.take_program_change() {
                         let _ = app_handle.emit("takt://program-change", program);
+                    }
+
+                    for (channel, cc, value) in engine.take_control_changes() {
+                        let _ = app_handle.emit(
+                            "takt://midi-cc",
+                            MidiCcDto {
+                                channel,
+                                cc,
+                                value,
+                            },
+                        );
                     }
 
                     if last_telemetry.elapsed() >= telemetry_interval {

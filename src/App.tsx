@@ -15,6 +15,10 @@ import {
   DEFAULT_BUFFERS,
   InitialStateDto,
   LayerDto,
+  MIDI_MAPPINGS_STORAGE_KEY,
+  MidiCcDto,
+  MidiMapping,
+  MidiTargetKind,
   Patch,
   PatchSnapshot,
   SnapshotLayerState,
@@ -49,6 +53,22 @@ export function App() {
   const [showAllMidiPorts, setShowAllMidiPorts] = useState(false);
   const [leftTab, setLeftTab] = useState<"pad" | "track">("pad");
   const [loadingTarget, setLoadingTarget] = useState<string | null>(null);
+  const [midiLearnMode, setMidiLearnMode] = useState(false);
+  const [armedTarget, setArmedTarget] = useState<MidiTargetKind | null>(null);
+  const [lastMidiCc, setLastMidiCc] = useState<MidiCcDto | null>(null);
+  const [midiMappings, setMidiMappings] = useState<MidiMapping[]>(() => {
+    try {
+      const raw = localStorage.getItem(MIDI_MAPPINGS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+  const midiLastToggleValRef = useRef<Map<string, number>>(new Map());
 
   const [pickerTarget, setPickerTarget] = useState<number | "add" | null>(null);
   const [editingLayerIdx, setEditingLayerIdx] = useState<number | null>(null);
@@ -671,6 +691,49 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(
+        MIDI_MAPPINGS_STORAGE_KEY,
+        JSON.stringify(midiMappings)
+      );
+    } catch {
+      // ignore
+    }
+  }, [midiMappings]);
+
+  useEffect(() => {
+    if (!midiLearnMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setArmedTarget(null);
+        setMidiLearnMode(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [midiLearnMode]);
+
+  const handleToggleMidiLearn = useCallback(() => {
+    setMidiLearnMode((prev) => {
+      if (prev) setArmedTarget(null);
+      return !prev;
+    });
+  }, []);
+
+  const handleArmMidiTarget = useCallback((target: MidiTargetKind) => {
+    setArmedTarget((prev) => (prev === target ? null : target));
+  }, []);
+
+  const handleClearMidiMapping = useCallback((target: MidiTargetKind) => {
+    setMidiMappings((prev) => prev.filter((m) => m.target !== target));
+  }, []);
+
+  const handleClearAllMidiMappings = useCallback(() => {
+    setMidiMappings([]);
+    setArmedTarget(null);
+  }, []);
+
+  useEffect(() => {
     const unlistenPc = listen<number>("takt://program-change", (event) => {
       const targetPatch = patches[event.payload];
       if (targetPatch) {
@@ -1046,6 +1109,101 @@ export function App() {
     }
   };
 
+  const midiDispatchRef = useRef<(ev: MidiCcDto) => void>(() => {});
+  midiDispatchRef.current = ({ channel, cc, value }: MidiCcDto) => {
+    setLastMidiCc({ channel, cc, value });
+    if (midiLearnMode && armedTarget) {
+      setMidiMappings((prev) => [
+        ...prev.filter(
+          (m) =>
+            m.target !== armedTarget &&
+            !(m.channel === channel && m.cc === cc)
+        ),
+        { target: armedTarget, channel, cc },
+      ]);
+      setArmedTarget(null);
+      return;
+    }
+
+    const mapping = midiMappings.find(
+      (m) => m.channel === channel && m.cc === cc
+    );
+    if (!mapping) return;
+
+    const ccKey = `${channel}:${cc}`;
+    const prevVal = midiLastToggleValRef.current.get(ccKey) ?? 0;
+    midiLastToggleValRef.current.set(ccKey, value);
+    const risingEdge = prevVal < 64 && value >= 64;
+
+    const { target } = mapping;
+    if (target === "master:volume") {
+      void handleVolumeChange(Math.round((value / 127) * 125));
+      return;
+    }
+    if (target === "pad:volume") {
+      void handleWorshipPadVolume(Math.round((value / 127) * 100));
+      return;
+    }
+    if (target === "track:volume") {
+      void handleTrackVolumeChange(Math.round((value / 127) * 100));
+      return;
+    }
+    if (target === "pad:power") {
+      if (risingEdge) void handleWorshipPadToggle();
+      return;
+    }
+    if (target === "track:play") {
+      if (risingEdge) void handleTrackPlayToggle();
+      return;
+    }
+
+    const layerMatch = /^layer:(\d+):(volume|chorus|audio02|reverb)$/.exec(
+      target
+    );
+    if (!layerMatch) return;
+    const idx = Number(layerMatch[1]);
+    const prop = layerMatch[2];
+    const layer = status?.layers[idx];
+    if (!layer) return;
+
+    if (prop === "volume") {
+      const nextVol = Math.round((value / 127) * 125) / 100;
+      handleUpdateLayer(idx, { volume: nextVol });
+    } else if (prop === "chorus" && risingEdge) {
+      const lit = layer.params.chorusMix > 0.02;
+      handleUpdateLayer(idx, {
+        paramsPatch: { chorusMix: lit ? 0.0 : 0.45 },
+      });
+    } else if (prop === "audio02" && risingEdge) {
+      const paramSet = new Set(layer.supportedParams);
+      if (paramSet.has("tremolo")) {
+        const lit = layer.params.tremoloDepth > 0.02;
+        handleUpdateLayer(idx, {
+          paramsPatch: { tremoloDepth: lit ? 0.0 : 0.45 },
+        });
+      } else if (paramSet.has("delay")) {
+        const lit = layer.params.delayMix > 0.02;
+        handleUpdateLayer(idx, {
+          paramsPatch: { delayMix: lit ? 0.0 : 0.28 },
+        });
+      }
+    } else if (prop === "reverb" && risingEdge) {
+      const lit = layer.params.reverbMix > 0.02;
+      handleUpdateLayer(idx, {
+        paramsPatch: { reverbMix: lit ? 0.0 : 0.3 },
+      });
+    }
+  };
+
+  useEffect(() => {
+    const unlistenCc = listen<MidiCcDto>("takt://midi-cc", (event) => {
+      midiDispatchRef.current(event.payload);
+    });
+    return () => {
+      unlistenCc.then((fn) => fn());
+    };
+  }, []);
+
   const volumePct = Math.round((status?.masterVolume ?? 0.8) * 100);
   const trackVolPct = Math.round((status?.backingTrackVolume ?? 0.75) * 100);
   const padVolPct = Math.round((status?.worshipPadVolume ?? 0.55) * 100);
@@ -1063,6 +1221,9 @@ export function App() {
         status={status}
         volumePct={volumePct}
         setupOpen={setupOpen}
+        midiLearnMode={midiLearnMode}
+        armedTarget={armedTarget}
+        masterMapping={midiMappings.find((m) => m.target === "master:volume")}
         onPanic={handlePanic}
         onVolumeChange={handleVolumeChange}
         onToggleSetup={() =>
@@ -1071,7 +1232,46 @@ export function App() {
             return !v;
           })
         }
+        onToggleMidiLearn={handleToggleMidiLearn}
+        onArmMidiTarget={handleArmMidiTarget}
+        onClearMidiMapping={handleClearMidiMapping}
       />
+
+      {midiLearnMode && (
+        <div className="midi-learn-banner" role="status">
+          <div className="midi-learn-banner-text">
+            <span className="midi-learn-dot" aria-hidden="true" />
+            <span>
+              {armedTarget
+                ? "Waiting for MIDI CC… Move a knob, fader, or button on your controller (Esc to exit)"
+                : "MIDI Learn active — click any fader, knob, or effect slot, then move a MIDI control"}
+            </span>
+          </div>
+          <div className="midi-learn-banner-actions">
+            {lastMidiCc && (
+              <span className="midi-learn-last-cc">
+                Ch {lastMidiCc.channel + 1} · CC {lastMidiCc.cc} ({lastMidiCc.value})
+              </span>
+            )}
+            {midiMappings.length > 0 && (
+              <button
+                type="button"
+                className="midi-learn-banner-btn"
+                onClick={handleClearAllMidiMappings}
+              >
+                Clear All ({midiMappings.length})
+              </button>
+            )}
+            <button
+              type="button"
+              className="midi-learn-banner-btn done"
+              onClick={handleToggleMidiLearn}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="error-banner" role="alert">
@@ -1130,6 +1330,11 @@ export function App() {
             onTrackLoopToggle={handleTrackLoopToggle}
             onTrackSeek={handleTrackSeek}
             onTrackVolumeChange={handleTrackVolumeChange}
+            midiLearnMode={midiLearnMode}
+            armedTarget={armedTarget}
+            midiMappings={midiMappings}
+            onArmMidiTarget={handleArmMidiTarget}
+            onClearMidiMapping={handleClearMidiMapping}
           />
 
           <LayerStrips
@@ -1145,6 +1350,11 @@ export function App() {
             onDeleteSnapshot={handleDeleteSnapshot}
             onAddSnapshot={handleAddSnapshot}
             onSaveCurrentSnapshot={handleSaveCurrentSnapshot}
+            midiLearnMode={midiLearnMode}
+            armedTarget={armedTarget}
+            midiMappings={midiMappings}
+            onArmMidiTarget={handleArmMidiTarget}
+            onClearMidiMapping={handleClearMidiMapping}
           />
         </div>
       )}
