@@ -1526,10 +1526,10 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 }
 
 .kb-pill.sustain-pill.on {
-  border-color: #22c55e;
-  background: rgba(34, 197, 94, 0.24);
-  color: #dcfce7;
-  box-shadow: 0 0 10px rgba(34, 197, 94, 0.35);
+  border-color: #c7d9ff;
+  background: #c7d9ff;
+  color: #111827;
+  box-shadow: 0 0 10px rgba(137, 168, 240, 0.4);
 }
 
 .octave-stepper {
@@ -1670,7 +1670,7 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 }
 
 .piano-key.white.mapped {
-  box-shadow: inset 0 -3px 0 #89a8f0;
+  background: linear-gradient(180deg, #e2ebfa 0%, #f4f8ff 18%, #e8effc 88%, #c7d6f0 100%);
 }
 
 .piano-key.white.pressed {
@@ -1705,9 +1705,7 @@ input[type="range"].v-fader::-webkit-slider-thumb {
 }
 
 .piano-key.black.mapped {
-  box-shadow:
-    0 3px 5px rgba(0, 0, 0, 0.65),
-    inset 0 -2px 0 #89a8f0;
+  background: linear-gradient(180deg, #323c54 0%, #1b2130 58%, #101420 100%);
 }
 
 .piano-key.black.pressed {

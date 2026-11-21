@@ -3193,7 +3193,6 @@ export default function App() {
             <div className="keyboard-left-group">
               {chordDetectEnabled && (
                 <div className="chord-readout-wrap" aria-live="polite">
-                  <span className="chord-label">Chord</span>
                   <span className={`chord-badge ${detectedChord ? "active" : ""}`}>
                     {detectedChord ?? "—"}
                   </span>
