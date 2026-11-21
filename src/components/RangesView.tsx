@@ -5,6 +5,7 @@ import {
   SoundParamsDto,
 } from "../types";
 import { midiNoteLabel } from "../utils/music";
+import { SlidersSvg } from "./ui";
 
 export interface ZoneDragState {
   layerIdx: number;
@@ -34,17 +35,17 @@ export function RangesView({
   return (
     <section className="zones-editor" aria-label="Layer Ranges & Alignments">
       <div className="zones-toolbar">
-        <div className="sound-title-row">
-          <label>Layer Ranges & Alignments</label>
-          <span className="keyboard-hint">
-            Drag handles to set range · Drag bar to shift · Double-click bar for
+        <div className="zones-title-group">
+          <span className="zones-title">Layer Ranges</span>
+          <span className="zones-hint">
+            Drag handles to set range · Drag bar to shift · Double-click for
             Full 88
           </span>
         </div>
         <div className="zones-actions">
           <button
             type="button"
-            className="btn-mini"
+            className="zones-btn"
             onClick={() => {
               layers.forEach((_, i) =>
                 onUpdateLayer(i, { minNote: 21, maxNote: 108 })
@@ -56,7 +57,7 @@ export function RangesView({
           {layers.length >= 2 && (
             <button
               type="button"
-              className="btn-mini"
+              className="zones-btn"
               onClick={() => {
                 onUpdateLayer(0, { minNote: 21, maxNote: 59 });
                 for (let i = 1; i < layers.length; i++) {
@@ -69,7 +70,7 @@ export function RangesView({
           )}
           <button
             type="button"
-            className="btn-mini active"
+            className="zones-btn primary"
             onClick={() => onOpenSoundPicker("add")}
           >
             + Add Layer
@@ -84,11 +85,11 @@ export function RangesView({
           if (!layer) {
             return (
               <div key={`empty-${slotIdx}`} className="zone-editor-row empty">
-                <div className="zone-gutter">
-                  <span
-                    className="zone-gutter-dot"
-                    style={{ background: color, opacity: 0.35 }}
-                  />
+                <div
+                  className="zone-gutter empty"
+                  style={{ "--layer-color": color } as React.CSSProperties}
+                >
+                  <span className="zone-color-bar" />
                   <span className="zone-gutter-idx">L{slotIdx + 1}</span>
                 </div>
                 <button
@@ -110,25 +111,28 @@ export function RangesView({
 
           return (
             <div key={`ze-${slotIdx}`} className="zone-editor-row">
-              <div className="zone-gutter">
+              <div
+                className={`zone-gutter ${layer.enabled ? "" : "muted"}`}
+                style={{ "--layer-color": color } as React.CSSProperties}
+              >
                 <button
                   type="button"
                   className={`zone-mute-btn ${layer.enabled ? "on" : ""}`}
-                  style={{ "--layer-color": color } as React.CSSProperties}
                   onClick={() =>
                     onUpdateLayer(slotIdx, { enabled: !layer.enabled })
                   }
                   title={layer.enabled ? "Mute layer" : "Enable layer"}
                 >
-                  L{slotIdx + 1}
+                  <span className="zone-color-bar" />
+                  <span>L{slotIdx + 1}</span>
                 </button>
                 <button
                   type="button"
-                  className="icon-btn"
+                  className="zone-tune-btn"
                   onClick={() => onOpenLayerInspector(slotIdx)}
                   title="Layer Controls"
                 >
-                  ≡
+                  <SlidersSvg />
                 </button>
               </div>
 

@@ -200,6 +200,19 @@ export const WORSHIP_KEYS = [
 ];
 
 export const OCTAVE_C_NOTES = [24, 36, 48, 60, 72, 84, 96, 108];
-export const LAYER_COLORS = ["#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
+export const LAYER_COLORS = [
+  "#f59e0b", // 1: Amber
+  "#22c55e", // 2: Green
+  "#3b82f6", // 3: Blue
+  "#a855f7", // 4: Purple
+  "#ec4899", // 5: Pink
+  "#06b6d4", // 6: Cyan
+  "#ef4444", // 7: Coral Red
+  "#84cc16", // 8: Lime
+  "#6366f1", // 9: Indigo
+  "#14b8a6", // 10: Teal
+  "#f97316", // 11: Tangerine
+  "#eab308", // 12: Gold
+];
 export const DEFAULT_BUFFERS = [64, 128, 256, 512, 1024];
 
