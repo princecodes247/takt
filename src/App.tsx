@@ -278,6 +278,31 @@ const FULL_PIANO_KEYS: FullPianoKey[] = [];
 const WHITE_KEYS = FULL_PIANO_KEYS.filter((k) => !k.isBlack);
 const BLACK_KEYS = FULL_PIANO_KEYS.filter((k) => k.isBlack);
 
+function noteBoundsPct(note: number): { left: number; right: number } {
+  const clamped = Math.max(21, Math.min(108, note));
+  const k = FULL_PIANO_KEYS[clamped - 21];
+  if (!k) return { left: 0, right: 100 };
+  if (!k.isBlack) {
+    const left = (k.whiteIndex / WHITE_KEYS.length) * 100;
+    const right = ((k.whiteIndex + 1) / WHITE_KEYS.length) * 100;
+    return { left, right };
+  }
+  const left = ((k.whiteIndex + 0.65) / WHITE_KEYS.length) * 100;
+  return { left, right: left + 1.32 };
+}
+
+function noteSpanPct(
+  minNote: number,
+  maxNote: number
+): { leftPct: number; widthPct: number } {
+  const lo = noteBoundsPct(Math.min(minNote, maxNote));
+  const hi = noteBoundsPct(Math.max(minNote, maxNote));
+  return {
+    leftPct: lo.left,
+    widthPct: Math.max(1.2, hi.right - lo.left),
+  };
+}
+
 const KEYBOARD_STORAGE_KEY = "takt:computer-keyboard";
 const CHORD_STORAGE_KEY = "takt:chord-detect";
 const PATCHES_STORAGE_KEY = "takt:patches-v1";
@@ -1666,9 +1691,11 @@ export default function App() {
   const handleWorshipPadKey = async (key: number) => {
     if (!status) return;
     setError(null);
+    const shouldDisable =
+      status.worshipPadEnabled && status.worshipPadKey === key;
     try {
       const next = await invoke<StatusDto>("set_worship_pad", {
-        enabled: true,
+        enabled: !shouldDisable,
         key,
       });
       setStatus(next);
@@ -1818,7 +1845,7 @@ export default function App() {
             <span className="master-label">Master</span>
             <input
               type="range"
-              className="filled-slider master-slider"
+              className="sk-master-slider"
               style={
                 { "--fill": `${(volumePct / 125) * 100}%` } as React.CSSProperties
               }
@@ -3501,10 +3528,9 @@ export default function App() {
               >
                 {layers.map((layer, idx) => {
                   const color = LAYER_COLORS[idx % LAYER_COLORS.length];
-                  const leftPct = ((layer.minNote - 21) / 87) * 100;
-                  const widthPct = Math.max(
-                    1.5,
-                    ((layer.maxNote - layer.minNote) / 87) * 100
+                  const { leftPct, widthPct } = noteSpanPct(
+                    layer.minNote,
+                    layer.maxNote
                   );
                   return (
                     <div
@@ -3559,7 +3585,7 @@ export default function App() {
                           <span className="key-cap">{qwertyLabel}</span>
                         )}
                         {isMiddleC && <span className="middle-c-dot" aria-hidden="true" />}
-                        {key.cLabel && !qwertyLabel && (
+                        {key.cLabel && !isMiddleC && !qwertyLabel && (
                           <span className="octave-mark">{key.cLabel}</span>
                         )}
                       </button>
