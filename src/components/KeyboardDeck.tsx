@@ -308,40 +308,76 @@ export function KeyboardDeck({
         </div>
 
         <div className="piano-deck-main">
-          <div
-            className="zone-bars"
-            role="button"
-            tabIndex={0}
-            title="Click to edit layer key ranges"
-            onClick={onOpenZonesView}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") onOpenZonesView();
-            }}
-          >
-            {layers.map((layer, idx) => {
+          {(() => {
+            type ZoneItem = {
+              idx: number;
+              layer: LayerDto;
+              color: string;
+              leftPct: number;
+              widthPct: number;
+            };
+            const zoneRows: ZoneItem[][] = [];
+            layers.forEach((layer, idx) => {
               const color = LAYER_COLORS[idx % LAYER_COLORS.length];
               const { leftPct, widthPct } = noteSpanPct(
                 layer.minNote,
                 layer.maxNote
               );
-              return (
-                <div
-                  key={`zone-${idx}`}
-                  className="zone-track"
-                  title={`${layer.soundName} · ${midiNoteLabel(layer.minNote)}–${midiNoteLabel(layer.maxNote)}`}
-                >
-                  <div
-                    className={`zone-fill ${layer.enabled ? "" : "muted"}`}
-                    style={{
-                      left: `${leftPct}%`,
-                      width: `${widthPct}%`,
-                      background: color,
-                    }}
-                  />
-                </div>
+              const item: ZoneItem = { idx, layer, color, leftPct, widthPct };
+              const targetRow = zoneRows.find((row) =>
+                row.every(
+                  (existing) =>
+                    existing.layer.maxNote < layer.minNote ||
+                    existing.layer.minNote > layer.maxNote
+                )
               );
-            })}
-          </div>
+              if (targetRow) {
+                targetRow.push(item);
+              } else {
+                zoneRows.push([item]);
+              }
+            });
+            const rowCount = zoneRows.length;
+            const gapPx = rowCount > 3 ? 2 : 4;
+            const trackHeight =
+              rowCount <= 3
+                ? 12
+                : Math.max(2, Math.floor((44 - (rowCount - 1) * gapPx) / rowCount));
+
+            return (
+              <div
+                className={`zone-bars ${rowCount > 3 ? "compact" : ""}`}
+                role="button"
+                tabIndex={0}
+                title="Click to edit layer key ranges"
+                onClick={onOpenZonesView}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") onOpenZonesView();
+                }}
+              >
+                {zoneRows.map((row, rowIdx) => (
+                  <div
+                    key={`zone-row-${rowIdx}`}
+                    className="zone-track"
+                    style={{ height: `${trackHeight}px` }}
+                  >
+                    {row.map((item) => (
+                      <div
+                        key={`zone-${item.idx}`}
+                        className={`zone-fill ${item.layer.enabled ? "" : "muted"}`}
+                        style={{
+                          left: `${item.leftPct}%`,
+                          width: `${item.widthPct}%`,
+                          background: item.color,
+                        }}
+                        title={`${item.layer.soundName} · ${midiNoteLabel(item.layer.minNote)}–${midiNoteLabel(item.layer.maxNote)}`}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
 
           <div className="mini-piano" aria-label="88-Key Piano">
             <div className="piano-felt-strip" aria-hidden="true" />

@@ -1752,8 +1752,14 @@ input[type="range"].v-fader::-webkit-slider-thumb {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 48px;
+  overflow: hidden;
   cursor: pointer;
   padding: 2px 0;
+}
+
+.zone-bars.compact {
+  gap: 2px;
 }
 
 .zone-track {
@@ -3158,10 +3164,11 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
 
 .zones-rows {
   flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
 }
 
 .zone-editor-row {
@@ -3169,6 +3176,7 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
   grid-template-columns: 76px 1fr;
   align-items: center;
   gap: 8px;
+  flex: 0 0 46px;
   height: 46px;
 }
 
