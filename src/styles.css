@@ -499,14 +499,26 @@ input:focus-visible {
   color: #9ca3af;
 }
 
+.sidebar-card-head.patches-head {
+  justify-content: flex-end;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
 .sidebar-new-btn {
+  width: 24px;
+  height: 24px;
   background: #252936;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   color: #e5e7eb;
-  font-size: 0.75rem;
-  font-weight: 650;
-  padding: 4px 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
@@ -542,6 +554,8 @@ input:focus-visible {
 
 .pad-track-card {
   flex: 0 0 auto;
+  padding: 7px;
+  gap: 6px;
 }
 
 .sub-tabs {
@@ -613,7 +627,7 @@ input:focus-visible {
 }
 
 .pad-split-pwr {
-  width: 36px;
+  width: 40px;
   flex-shrink: 0;
   border: none;
   border-right: 1px solid rgba(0, 0, 0, 0.35);
@@ -644,8 +658,9 @@ input:focus-visible {
   border: none;
   border-radius: 0 6px 6px 0;
   background: transparent;
-  padding: 6px 9px;
-  font-size: 0.78rem;
+  min-height: 38px;
+  padding: 9px 11px;
+  font-size: 0.82rem;
 }
 
 .pad-voice-select .custom-select-trigger:hover,
@@ -703,7 +718,7 @@ input:focus-visible {
 .pad-body {
   display: grid;
   grid-template-columns: 1fr 40px;
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
 }
 
@@ -711,7 +726,7 @@ input:focus-visible {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .sidebar-fader-col {
@@ -736,7 +751,7 @@ input:focus-visible {
 .pad-key-grid-4x3 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
+  gap: 3px;
 }
 
 .pad-key-btn {
@@ -744,9 +759,10 @@ input:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   color: #cbd5e1;
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   font-weight: 650;
-  padding: 8px 0;
+  min-height: 38px;
+  padding: 10px 0;
   cursor: pointer;
 }
 
@@ -3492,26 +3508,27 @@ input[type="range"].seek-bar::-webkit-slider-thumb {
 
 .patch-nav-row {
   margin-top: auto;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .patch-nav-btn {
-  background: #222633;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  color: #d1d5db;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #9ca3af;
   font-size: 0.78rem;
   font-weight: 600;
-  padding: 6px 8px;
+  padding: 4px 6px;
   cursor: pointer;
 }
 
 .patch-nav-btn:hover:not(:disabled) {
-  background: #2b3040;
+  background: transparent;
   color: #ffffff;
 }
 

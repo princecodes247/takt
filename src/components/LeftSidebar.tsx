@@ -62,15 +62,15 @@ export function LeftSidebar({
   return (
     <aside className="stage-sidebar">
       <section className="sidebar-card favorites-card">
-        <div className="sidebar-card-head">
-          <span className="sidebar-title">Patches</span>
+        <div className="sidebar-card-head patches-head">
           <button
             type="button"
             className="sidebar-new-btn"
             onClick={onCreatePatch}
+            aria-label="Save current layers as a new Patch"
             title="Save current layers as a new Patch"
           >
-            + New
+            +
           </button>
         </div>
         <div className="favorites-list">
