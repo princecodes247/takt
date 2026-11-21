@@ -1625,6 +1625,8 @@ input[type="range"].v-fader::-webkit-slider-thumb {
   grid-template-columns: 26px 1fr;
   gap: 6px;
   padding: 1px 0;
+  align-self: end;
+  height: 88px;
 }
 
 .midi-wheel-col {

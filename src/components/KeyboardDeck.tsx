@@ -255,7 +255,6 @@ export function KeyboardDeck({
                 </div>
               </div>
             </div>
-            <span className="midi-wheel-label">PB</span>
           </div>
 
           <div className="midi-wheel-col">
@@ -305,7 +304,6 @@ export function KeyboardDeck({
                 })}
               </div>
             </div>
-            <span className="midi-wheel-label">MOD</span>
           </div>
         </div>
 
